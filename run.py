@@ -23,9 +23,11 @@ def main():
         camera.launch()
         serve(app,host=config['host'],port=config['port'],threads=8)
     finally:
-        heater.close()
-        camera.close()
-        lock.close()
+        try:
+            heater.close()
+        finally:
+            camera.close()
+            lock.close()
 
 
 if __name__=='__main__':

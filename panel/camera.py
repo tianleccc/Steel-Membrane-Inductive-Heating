@@ -35,10 +35,12 @@ class Camera:
         with self.lock:
             return dict(self.state)
 
-    def light(self, enabled):
+    def light(self, enabled, renew=False):
         with self.lock:
             if enabled and not self.state['ready']:
                 raise ValueError('相机未就绪')
+            if renew and (not enabled or time.monotonic() >= self.lease):
+                raise ValueError('激发光已关闭，需要手动重新开启')
             self.lease = time.monotonic()+15 if enabled else 0
             self.state['preview_light'] = bool(enabled)
             if not enabled and self.led and not self.state['busy']:

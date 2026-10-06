@@ -121,10 +121,12 @@ def create_app(config=None, heater=None, camera=None):
 
     @app.post('/api/camera/light')
     def light():
-        enabled=body().get('enabled')
-        if not isinstance(enabled,bool):
+        data=body()
+        enabled=data.get('enabled')
+        renew=data.get('renew',False)
+        if not isinstance(enabled,bool) or not isinstance(renew,bool):
             raise ValueError('enabled 必须为布尔值')
-        camera.light(enabled)
+        camera.light(enabled,renew=renew)
         return jsonify(ok=True)
 
     @app.post('/api/stop')

@@ -118,5 +118,14 @@ class ControlTests(unittest.TestCase):
         self.assertEqual(client.post('/api/stop',json={},headers={'X-Panel-Token':token}).status_code,200)
         self.assertEqual(client.get('/photos/../../config.json').status_code,404)
 
+    def test_stopped_light_cannot_be_reenabled_by_old_heartbeat(self):
+        camera=Camera(self.c,self.h.snapshot)
+        camera.state['ready']=True
+        camera.light(True)
+        camera.stop()
+        with self.assertRaises(ValueError): camera.light(True,renew=True)
+        camera.light(True)
+        self.assertTrue(camera.snapshot()['preview_light'])
+
 
 if __name__=='__main__': unittest.main()

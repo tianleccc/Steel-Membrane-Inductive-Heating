@@ -165,7 +165,7 @@ class Heater:
             index = 0
             while not self.quit.is_set():
                 start = self.clock()
-                if index % self.c['sample_every'] == 0 or not self.state['active']:
+                if index % self.c['sample_every'] == 0:
                     # Sensor I/O happens only with the heater physically off.
                     with self.lock:
                         self.hw.set_duty(0)

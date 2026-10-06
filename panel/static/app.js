@@ -20,7 +20,7 @@ $('stop-all').onclick=()=>{lightWanted=false;$('light').checked=false;act('stop'
 $('reset').onclick=()=>act('heater/reset',{},'温控故障已清除');
 $('capture').onclick=()=>act('camera/capture',{},'已安排拍照，激发光预热后保存');
 $('light').onchange=async()=>{lightWanted=$('light').checked;try{await api('camera/light',{enabled:lightWanted});}catch(e){lightWanted=false;$('light').checked=false;notify(e.message);}};
-setInterval(async()=>{if(lightWanted&&!document.hidden){try{await api('camera/light',{enabled:true});}catch{lightWanted=false;$('light').checked=false;}}},5000);
+setInterval(async()=>{if(lightWanted&&!document.hidden){try{await api('camera/light',{enabled:true,renew:true});}catch{lightWanted=false;$('light').checked=false;}}},5000);
 document.addEventListener('visibilitychange',()=>{if(document.hidden&&lightWanted){lightWanted=false;$('light').checked=false;api('camera/light',{enabled:false}).catch(()=>{});}});
 function estimate(){const n=(Number($('count').value)-1)*Number($('interval').value);$('capture-estimate').textContent=`预计约 ${Math.floor(n/60)} 分 ${Math.round(n%60)} 秒`;}
 $('count').oninput=$('interval').oninput=estimate;

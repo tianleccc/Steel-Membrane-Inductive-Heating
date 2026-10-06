@@ -1,0 +1,23 @@
+[Unit]
+Description=Steel Membrane camera and infrared heating panel
+After=network.target
+
+[Service]
+Type=simple
+User=@USER@
+SupplementaryGroups=gpio i2c video render
+WorkingDirectory=@ROOT@
+Environment=GPIOZERO_PIN_FACTORY=lgpio
+Environment=PYTHONUNBUFFERED=1
+ExecStart=@ROOT@/.venv/bin/python @ROOT@/run.py
+Restart=on-failure
+RestartSec=5
+KillSignal=SIGTERM
+TimeoutStopSec=15
+UMask=0027
+NoNewPrivileges=true
+ProtectSystem=full
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,208 @@
+"""MLX90614 control adapted from the user's temp.py; no power at startup."""
+import csv
+import math
+import threading
+import time
+from collections import deque
+from datetime import datetime, timezone
+from pathlib import Path
+from statistics import median
+
+
+class PID:
+    def __init__(self, kp, ki, kd, target):
+        self.kp, self.ki, self.kd, self.target = kp, ki, kd, target
+        self.integral = 0.0
+        self.last = None
+
+    def update(self, value, now):
+        error = self.target - value
+        derivative = 0.0
+        if self.last:
+            dt = max(now - self.last[0], 0.001)
+            self.integral = max(-1000, min(1000, self.integral + error * dt))
+            derivative = (error - self.last[1]) / dt
+        self.last = now, error
+        return max(0, min(100, self.kp * error + self.ki * self.integral + self.kd * derivative))
+
+
+class Heater:
+    def __init__(self, config, hardware_factory, clock=time.monotonic):
+        self.c, self.factory, self.clock = config, hardware_factory, clock
+        self.lock = threading.RLock()
+        self.quit = threading.Event()
+        self.hw = None
+        self.thread = None
+        self.history = deque(maxlen=1200)
+        self.log = None
+        self.writer = None
+        self.pid = None
+        self.deadline = 0
+        self.last_sample = 0
+        self.state = dict(ready=False, enabled=config['heater_enabled'], active=False,
+                          temperature=None, ambient=None, filtered=None, target=None,
+                          duty=0, fault=None, remaining_s=0, log=None)
+
+    def launch(self):
+        self.thread = threading.Thread(target=self.run, daemon=True, name='heater')
+        self.thread.start()
+
+    def snapshot(self):
+        with self.lock:
+            s = dict(self.state)
+            s['remaining_s'] = max(0, self.deadline-self.clock()) if s['active'] else 0
+            return s
+
+    def _off(self):
+        if self.hw:
+            self.hw.set_duty(0)
+        self.state['duty'] = 0
+
+    def _stop(self, fault=None):
+        self.state['active'] = False
+        self.state['remaining_s'] = 0
+        if fault:
+            self.state['fault'] = str(fault)
+        try:
+            self._off()
+        finally:
+            if self.log:
+                self.log.close()
+                self.log = self.writer = None
+
+    def stop(self):
+        with self.lock:
+            self._stop()
+
+    def start(self, target, duration, duty_cap):
+        if not all(isinstance(x, (float, int)) and not isinstance(x, bool) and math.isfinite(x)
+                   for x in (target, duration, duty_cap)):
+            raise ValueError('参数必须是有限数值')
+        if not (0 < target < self.c['cutoff_c'] and 1 <= duration <= self.c['max_duration_s']
+                and 0 < duty_cap <= self.c['duty_cap']):
+            raise ValueError('目标温度、加热时长或功率上限超出范围')
+        with self.lock:
+            if not self.state['enabled']:
+                raise ValueError('加热尚未启用：请先确认接线并修改 config.json')
+            if not self.state['ready'] or self.clock()-self.last_sample > 2:
+                raise ValueError('温度传感器未就绪或读数已过期')
+            if self.state['fault']:
+                raise ValueError('请先排除故障并点击清除故障')
+            if self.state['active']:
+                raise ValueError('加热正在运行，请先停止')
+            if self.state['temperature'] >= self.c['cutoff_c']:
+                raise ValueError('温度超过保护阈值')
+            folder = Path(self.c['data_dir'])/'logs'
+            folder.mkdir(parents=True, exist_ok=True)
+            name = datetime.now(timezone.utc).strftime('heat_%Y%m%dT%H%M%S_%fZ.csv')
+            self.log = (folder/name).open('w', newline='', encoding='utf-8')
+            self.writer = csv.writer(self.log)
+            self.writer.writerow(['utc','object_c','ambient_c','filtered_c','target_c','duty_pct'])
+            self.log.flush()
+            self.pid = PID(self.c['kp'], self.c['ki'], self.c['kd'], target)
+            self.cap = duty_cap
+            self.deadline = self.clock()+duration
+            self.state.update(active=True, target=target, log=name, duty=0)
+
+    def clear_fault(self):
+        with self.lock:
+            if self.state['active'] or not self.state['ready'] or self.clock()-self.last_sample > 2:
+                raise ValueError('需要新鲜、有效的温度读数，且加热已停止')
+            if self.state['temperature'] >= self.c['cutoff_c']:
+                raise ValueError('温度仍超过保护阈值')
+            self.state['fault'] = None
+
+    def sample(self, readings):
+        """Every sample must be valid; cutoff checks raw peaks before smoothing."""
+        with self.lock:
+            if not readings or any(not math.isfinite(o) or not math.isfinite(a)
+                                   or not -40 < o < 300 or not -40 < a < 125 for o,a in readings):
+                self.state['ready'] = False
+                self._stop('红外温度读数无效；加热已锁定关闭')
+                return
+            obj, amb = median(o for o,a in readings), median(a for o,a in readings)
+            old = self.state['filtered']
+            ema = obj if old is None else self.c['ema']*obj+(1-self.c['ema'])*old
+            self.last_sample = self.clock()
+            self.state.update(ready=True, temperature=obj, ambient=amb, filtered=ema)
+            if max(o for o,a in readings) >= self.c['cutoff_c']:
+                self._stop('红外温度达到过温保护阈值')
+            if self.state['active']:
+                if self.clock() >= self.deadline:
+                    self._stop()
+                else:
+                    requested = self.pid.update(ema, self.clock())
+                    if ema < self.pid.target:
+                        requested = max(requested, self.c['min_duty'])
+                    # Apply caps LAST, so minimum duty can never override the user's cap.
+                    self.state['duty'] = min(requested, self.cap,
+                                             self.state['duty']+self.c['slew'])
+            self.history.append(dict(t=time.time(), temperature=obj, target=self.state['target'],
+                                     duty=self.state['duty']))
+            if self.writer:
+                self.writer.writerow([datetime.now(timezone.utc).isoformat(), obj, amb, ema,
+                                      self.state['target'], self.state['duty']])
+                self.log.flush()
+
+    def output(self):
+        with self.lock:
+            if not self.state['active']:
+                self._off()
+                return 0
+            if self.clock() >= self.deadline:
+                self._stop()
+                return 0
+            if self.clock()-self.last_sample > 2:
+                self._stop('温度读数超时')
+                return 0
+            duty = self.state['duty']
+            self.hw.set_duty(100 if self.c['burst'] and duty else duty)
+            return duty
+
+    def run(self):
+        try:
+            self.hw = self.factory(self.c)
+            index = 0
+            while not self.quit.is_set():
+                start = self.clock()
+                if index % self.c['sample_every'] == 0 or not self.state['active']:
+                    # Sensor I/O happens only with the heater physically off.
+                    with self.lock:
+                        self.hw.set_duty(0)
+                    try:
+                        readings = []
+                        for _ in range(self.c['samples']):
+                            if self.quit.wait(self.c['off_window_s']/self.c['samples']):
+                                break
+                            readings.append(self.hw.read())
+                        if not self.quit.is_set():
+                            self.sample(readings)
+                    except Exception as exc:
+                        with self.lock:
+                            self.state['ready'] = False
+                            self._stop(f'MLX90614 读取失败: {exc}')
+                duty = self.output()
+                remaining = max(0, self.c['cycle_s']-(self.clock()-start))
+                if self.c['burst']:
+                    self.quit.wait(remaining*duty/100)
+                    with self.lock:
+                        self.hw.set_duty(0)
+                    self.quit.wait(remaining*(1-duty/100))
+                else:
+                    self.quit.wait(remaining)
+                index += 1
+        except Exception as exc:
+            with self.lock:
+                self.state.update(ready=False, fault=f'温控初始化/运行失败: {exc}')
+        finally:
+            with self.lock:
+                self._stop()
+                self.state['ready'] = False
+            if self.hw:
+                self.hw.close()
+
+    def close(self):
+        self.quit.set()
+        self.stop()
+        if self.thread:
+            self.thread.join(3)

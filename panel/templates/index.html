@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="panel-token" content="{{ token }}">
+  <title>Steel Membrane · 实验控制台</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <header><a class="brand" href="/"><span class="mark">S<span>M</span></span><span>STEEL MEMBRANE<small>成像与感应加热 · 实验控制台</small></span></a><div class="header-right"><span id="connection" class="pill">正在连接</span><button id="stop-all" class="danger">■ 全部停止</button></div></header>
+  <main>
+    <div class="intro"><div><span class="eyebrow">INSTRUMENT WORKSPACE</span><h1>让每一次观察，有迹可循。</h1><p>在同一工作台控制荧光成像与温度，记录实验的每一个变化。</p></div><div class="device">RASPBERRY PI 5<small>Camera Module 3 / MLX90614</small><span id="disk">读取设备状态…</span></div></div>
+    <nav><button class="tab active" data-tab="live">实验工作台</button><button class="tab" data-tab="gallery">照片档案 <span id="photo-count">—</span></button><button class="tab" data-tab="logs">温度日志</button></nav>
+    <div id="message" role="status" hidden></div>
+    <section id="live" class="tab-view">
+      <div class="workspace">
+        <article class="card imaging"><div class="card-head"><div><span class="eyebrow">01 / IMAGING</span><h2>实时观察</h2></div><span id="camera-status" class="pill">相机初始化中</span></div>
+          <div class="preview"><img id="preview" alt="相机实时预览" hidden><div id="preview-empty"><span class="viewfinder">⌗</span><strong>等待相机画面</strong><span>相机就绪后会自动显示实时预览</span></div><span class="live-label"><i></i> LIVE VIEW</span><span class="preview-tag">全分辨率照片 · 低分辨率预览</span></div>
+          <div class="preview-controls"><label class="toggle"><input id="light" type="checkbox"><span>荧光激发光</span></label><span id="light-note">关闭 · 拍照时自动点亮</span><button id="capture" class="secondary">◎ 拍一张</button></div>
+          <p class="hint">打开激发光可实时观察荧光；持续照明可能使样品漂白。关闭页面后激发光将在 15 秒内关闭。</p>
+          <div class="capture-plan"><div><h3>定时采集</h3><p>第一张立即拍摄，此后按间隔采集。</p></div><form id="capture-form"><label>拍照间隔 <div class="unit-input"><input id="interval" type="number" min="2" max="86400" step="0.1" value="30" required><span>秒</span></div></label><label>照片数量 <div class="unit-input"><input id="count" type="number" min="1" max="100000" value="20" required><span>张</span></div></label><button id="start-camera" class="primary" type="submit">开始采集 →</button><button id="stop-camera" type="button" class="secondary">停止</button></form></div>
+          <div class="progress-row"><span id="capture-progress">尚未开始采集</span><span id="capture-estimate">预计约 9 分 30 秒</span></div><progress id="progress" max="20" value="0"></progress><div id="camera-error" class="inline-error" hidden></div>
+        </article>
+        <article class="card heating"><div class="card-head"><div><span class="eyebrow">02 / TEMPERATURE</span><h2>红外温控</h2></div><span id="heater-status" class="pill">初始化中</span></div>
+          <div class="temperature"><span id="temp">—</span><span>°C</span></div><div class="temp-caption">MLX90614 · 物体温度</div>
+          <div class="metrics"><div><span>环境温度</span><strong id="ambient">— °C</strong></div><div><span>输出占空比</span><strong id="duty">0 %</strong></div><div><span>剩余时间</span><strong id="remaining">—</strong></div></div>
+          <div class="chart-wrap"><canvas id="chart" aria-label="最近温度变化曲线"></canvas><span class="chart-label">最近 10 分钟 · °C</span></div>
+          <form id="heat-form"><div class="heat-fields"><label>目标温度 <div class="unit-input"><input id="target" type="number" min="1" max="{{ cutoff - 0.1 }}" step="0.1" value="50" required><span>°C</span></div></label><label>加热时长 <div class="unit-input"><input id="duration" type="number" min="1" max="{{ max_duration }}" value="300" required><span>秒</span></div></label><label>输出上限 <div class="unit-input"><input id="cap" type="number" min="1" max="{{ max_duty }}" value="30" required><span>%</span></div></label></div><div class="heat-actions"><button id="start-heat" class="primary" type="submit">开始加热 →</button><button id="stop-heat" type="button" class="secondary">停止加热</button></div></form>
+          <p class="hint">{{ cutoff }} °C 过温保护 · 传感器故障自动停止<br>加热与定时拍照独立运行；关闭浏览器后任务继续，直至完成或手动停止。</p><div id="heater-error" class="inline-error" hidden></div><button id="reset" class="text-button">清除温控故障</button>
+        </article>
+      </div>
+      <div class="footnote"><span>● 启动与重启后，加热和激发光默认关闭</span><span>照片包含拍摄时间、相机设置与当时温度记录</span></div>
+    </section>
+    <section id="gallery" class="tab-view" hidden><div class="section-head"><div><span class="eyebrow">OBSERVATION ARCHIVE</span><h2>照片档案</h2><p>按时间浏览每一次观察，点击照片查看大图并下载原图。</p></div><div><label>拍摄日期（UTC） <input id="filter-date" type="date"></label><button id="refresh-gallery" class="secondary">刷新</button></div></div><div id="gallery-grid"></div><div class="pagination"><button id="prev-page" class="secondary">← 上一页</button><span id="page-info">第 1 页</span><button id="next-page" class="secondary">下一页 →</button></div></section>
+    <section id="logs" class="tab-view" hidden><div class="section-head"><div><span class="eyebrow">EXPERIMENT RECORDS</span><h2>温度日志</h2><p>每次加热独立记录 CSV；包含物体温度、环境温度、目标温度及占空比。</p></div><button id="refresh-logs" class="secondary">刷新</button></div><div id="log-list"></div></section>
+  </main>
+  <footer><span>STEEL MEMBRANE / LAB INSTRUMENTS</span><span>本地采集 · 可追溯记录</span></footer>
+  <dialog id="photo-dialog"><div class="dialog-head"><span id="photo-title"></span><button id="close-photo" class="secondary">关闭 ×</button></div><img id="full-photo" alt="历史照片"><div class="dialog-foot"><button id="previous-photo" class="secondary">← 前一张</button><a id="download-photo" class="primary" download>下载原图 ↓</a><button id="next-photo" class="secondary">后一张 →</button></div></dialog>
+  <script src="/static/app.js" defer></script>
+</body></html>

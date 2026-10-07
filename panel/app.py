@@ -3,6 +3,7 @@ import os
 import re
 import secrets
 import shutil
+import subprocess
 from pathlib import Path
 from urllib.parse import urlsplit
 
@@ -12,6 +13,7 @@ from .assays import Assays, duration_seconds
 from .camera import Camera
 from .hardware import IRHardware
 from .heating import Heater
+from .exports import Exports
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -42,6 +44,8 @@ def create_app(config=None, heater=None, camera=None):
     camera = camera or Camera(c, heater.snapshot)
     assays = Assays(c, heater, camera)
     archive = assays.archive
+    exports = Exports(assays)
+    app.extensions['exports'] = exports
     app.extensions.update(heater=heater,camera=camera,assays=assays)
 
     @app.before_request
@@ -96,6 +100,7 @@ def create_app(config=None, heater=None, camera=None):
         data=body()
         with assays.lock:
             assays.standalone()
+            exports.protect('unassigned')
             if 'duty_cap' in data or 'duration' in data:
                 raise ValueError('This page is outdated. Refresh to use minutes and PID controls.')
             heater.start(data.get('target'),duration_seconds(data.get('duration_minutes'),c['max_duration_s']),data.get('pid'))
@@ -122,6 +127,7 @@ def create_app(config=None, heater=None, camera=None):
         data=body()
         with assays.lock:
             assays.standalone()
+            exports.protect('unassigned')
             camera.start(data.get('interval'),data.get('count'))
         return jsonify(ok=True)
 
@@ -129,6 +135,7 @@ def create_app(config=None, heater=None, camera=None):
     def capture():
         with assays.lock:
             assays.standalone()
+            exports.protect('unassigned')
             camera.capture()
         return jsonify(ok=True)
 
@@ -248,6 +255,7 @@ def create_app(config=None, heater=None, camera=None):
         assay_id=data.get('assay_id','unassigned')
         with assays.lock:
             assays.assert_deletable(assay_id)
+            exports.protect(assay_id)
             trash_id=archive.delete(assay_id,data.get('kind'),data.get('name'))
         return jsonify(ok=True,trash_id=trash_id)
 
@@ -257,7 +265,38 @@ def create_app(config=None, heater=None, camera=None):
             assays.standalone()
             # Do not restore into folders currently owned by standalone writers.
             assays.assert_deletable('unassigned')
+            with exports.lock:
+                if exports.job and exports.job['status'] == 'running':
+                    raise ValueError('Wait for the export to finish before restoring files')
             archive.restore(body().get('trash_id'))
         return jsonify(ok=True)
+
+    @app.get('/api/usb')
+    def usb_list():
+        try:
+            return jsonify(items=[{k:v for k,v in drive.items() if k != 'identity'} for drive in exports.drives()])
+        except (OSError, RuntimeError, subprocess.SubprocessError) as error:
+            return jsonify(error=f'USB detection failed: {error}'), 503
+
+    @app.post('/api/exports')
+    def export_start():
+        data = body()
+        return jsonify(exports.start(data.get('assay_id'), data.get('mode'), data.get('drive_id')))
+
+    @app.get('/api/exports/current')
+    def export_current():
+        with exports.lock:
+            return jsonify(job=exports.snapshot(exports.job['id']) if exports.job else None)
+
+    @app.get('/api/exports/<job_id>')
+    def export_status(job_id):
+        return jsonify(exports.snapshot(job_id))
+
+    @app.get('/exports/<job_id>/download')
+    def export_download(job_id):
+        file, name = exports.download(job_id)
+        response = send_file(file, mimetype='application/zip', as_attachment=True, download_name=name)
+        response.call_on_close(file.close)
+        return response
 
     return app

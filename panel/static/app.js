@@ -216,7 +216,7 @@ function folderView() {
     $('delete-assay').disabled = ['running', 'starting'].includes(record.status);
   }
 }
-async function openFolder(id) { selectedAssay = id; page = 0; $('filter-date').value = ''; folderView(); await loadGallery(); }
+async function openFolder(id) { selectedAssay = id; page = 0; $('filter-date').value = ''; folderView(); await loadGallery(); await refreshUSB(); }
 async function refreshGallery() {
   await refreshCatalog();
   if (selectedAssay && !assayRecords.some(r => r.id === selectedAssay)) selectedAssay = null;
@@ -307,3 +307,46 @@ function drawChart(points){const cv=$('chart'),box=cv.getBoundingClientRect();if
 async function chart(){try{drawChart(await api('history'));}catch{}setTimeout(chart,4000);}
 
 poll(); preview(); refreshCatalog(); chart(); estimate();
+
+// Export jobs run on the Pi. Polling never holds the hardware control lock.
+let exportTimer = null, currentExport = null;
+async function refreshUSB() {
+  try {
+    const data = await api('usb');
+    options('usb-drive', data.items.map(d => [d.id, `${d.label} · ${(d.free_bytes / 1e9).toFixed(1)} GB free`]), 'Select a USB drive');
+    if (data.items.length === 1) $('usb-drive').value = data.items[0].id;
+    $('usb-note').textContent = data.items.length ? 'Wait for Export complete, then safely eject the drive using the Pi desktop before unplugging.' : 'No writable USB drive found. Insert one into the Raspberry Pi and open it in the Pi file manager to mount it, then click Refresh USB drives.';
+  } catch (error) { $('usb-note').textContent = error.message; }
+}
+function displayExport(job) {
+  currentExport = job;
+  const running = job?.status === 'running';
+  $('download-folder').disabled = $('export-usb').disabled = !!running;
+  $('export-status').hidden = !job;
+  $('export-download').hidden = !job || job.mode !== 'photos' || job.status !== 'complete';
+  if (!job) return;
+  $('export-status').textContent = job.status === 'running' ? `Exporting ${job.name}: ${job.completed} / ${job.total} files. Keep the USB connected.` : job.status === 'failed' ? `Export failed: ${job.error}` : job.mode === 'usb' ? `Export complete: ${job.destination}. You can now safely eject the USB drive from the Pi desktop.` : `ZIP ready: ${job.name}. Click Download ready ZIP below to save it to this computer.`;
+  if (job.mode === 'photos' && job.status === 'complete') $('export-download').href = `/exports/${job.id}/download`;
+  clearTimeout(exportTimer);
+  if (running) exportTimer = setTimeout(pollExport, 1000);
+}
+async function pollExport() {
+  try { displayExport((await api('exports/current')).job); }
+  catch (error) {
+    $('export-status').hidden = false;
+    $('export-status').textContent = 'Connection lost while checking export. Keep the USB connected; reconnect to check completion.';
+    exportTimer = setTimeout(pollExport, 3000);
+  }
+}
+async function beginExport(mode) {
+  if (!selectedAssay) return;
+  const driveId = $('usb-drive').value;
+  if (mode === 'usb' && !driveId) { notify('Select a USB drive connected to the Raspberry Pi first.'); return; }
+  $('download-folder').disabled = $('export-usb').disabled = true;
+  try { displayExport(await api('exports', {assay_id: selectedAssay, mode, drive_id: driveId})); }
+  catch (error) { notify(error.message); displayExport(currentExport); }
+}
+$('download-folder').onclick = () => beginExport('photos');
+$('export-usb').onclick = () => beginExport('usb');
+$('refresh-usb').onclick = refreshUSB;
+pollExport();

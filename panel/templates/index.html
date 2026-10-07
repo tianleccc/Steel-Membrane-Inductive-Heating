@@ -4,7 +4,7 @@
   <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
   <meta name="panel-token" content="{{ token }}">
   <title>Steel Membrane · Instrument Panel</title>
-  <link rel="stylesheet" href="/static/style.css?v=assay-1">
+  <link rel="stylesheet" href="/static/style.css?v=export-1">
 </head>
 <body>
   <header><a class="brand" href="/"><span class="mark">S<span>M</span></span><span>STEEL MEMBRANE<small>Imaging & induction heating</small></span></a><div class="header-right"><span id="connection" class="pill">Connecting</span><button id="stop-all" class="danger">■ Stop all</button></div></header>
@@ -60,10 +60,20 @@
     <section id="gallery" class="tab-view" hidden>
       <div class="section-head"><div><span class="eyebrow">OBSERVATION ARCHIVE</span><h2 id="gallery-title">Assay folders</h2><p id="gallery-description">Find your experiments by operator or assay name.</p></div><button id="refresh-gallery" class="secondary">Refresh</button></div>
       <div id="folder-filters" class="archive-filters"><label>Operator<select id="archive-operator"><option value="">All operators</option></select></label><label>Find an assay<input id="assay-search" type="search" placeholder="Assay name or operator"></label></div>
+      <div id="export-status" role="status" class="folder-summary" hidden></div>
+      <a id="export-download" hidden>Download ready ZIP ↓</a>
       <div id="folder-grid" class="folder-grid"></div>
       <div id="photo-browser" hidden>
         <div class="archive-filters"><button id="back-folders" class="secondary">← All assay folders</button><label>Capture date (UTC)<input id="filter-date" type="date"></label><button id="folder-logs" class="secondary">View temperature logs</button><button id="delete-assay" class="danger">Delete assay folder</button></div>
         <div id="folder-summary" class="folder-summary"></div>
+        <div class="export-controls">
+          <button id="download-folder" class="secondary">Download all photos (ZIP)</button>
+          <label>USB drive on this Raspberry Pi<select id="usb-drive"><option value="">Select a USB drive</option></select></label>
+          <button id="refresh-usb" class="secondary">Refresh USB drives</button>
+          <button id="export-usb" class="secondary">Export assay to USB</button>
+        </div>
+        <p class="hint">ZIP includes all original photos and metadata, regardless of the date filter. USB export includes photos, temperature logs and assay details. Finish or stop the assay before exporting.</p>
+        <p id="usb-note" class="hint"></p>
         <div id="gallery-grid"></div><div class="pagination"><button id="prev-page" class="secondary">← Previous page</button><span id="page-info">Page 1</span><button id="next-page" class="secondary">Next page →</button></div>
       </div>
     </section>
@@ -73,5 +83,5 @@
   </main>
   <footer><span>STEEL MEMBRANE / LAB INSTRUMENTS</span><span>Local acquisition · Traceable records</span></footer>
   <dialog id="photo-dialog"><div class="dialog-head"><span id="photo-title"></span><button id="close-photo" class="secondary">Close ×</button></div><img id="full-photo" alt="Archived photo"><div class="dialog-foot"><button id="previous-photo" class="secondary">← Previous photo</button><button id="delete-photo" class="danger">Delete photo</button><a id="download-photo" class="primary" download>Download original ↓</a><button id="next-photo" class="secondary">Next photo →</button></div></dialog>
-  <script src="/static/app.js?v=assay-1" defer></script>
+  <script src="/static/app.js?v=export-1" defer></script>
 </body></html>

@@ -180,6 +180,36 @@ Pulling this public repository does not require a GitHub password on the Pi. To 
 
 Back up `data/` and `config.json` separately. To duplicate the system, use the installation steps on the new Pi and review its wiring and configuration. Do not copy the old device's SSH host keys or login credentials.
 
+## Downloading photos and exporting to USB
+
+Open **Photo archive**, then open an assay folder:
+
+- **Download all photos (ZIP)** prepares every original photo in the folder, plus
+  photo metadata and the assay manifest. It ignores the current date filter and
+  excludes thumbnails and temperature CSVs. When preparation finishes, click
+  **Download ready ZIP** to save it on the computer running the browser.
+- **Export assay to USB** copies the complete assay (originals, thumbnails,
+  metadata, temperature logs and assay manifest) into a new folder on a USB drive
+  connected to the **Raspberry Pi**. Select the drive and click the export button.
+  It also works offline from the desktop console. No existing USB files are overwritten.
+
+Finish or stop the assay before exporting. Export progress appears in the archive;
+closing the page does not stop copying. Reopen the archive to check the latest job.
+Wait for **Export complete**, then safely eject the drive in the Pi desktop file
+manager before unplugging it. The USB option lists writable, mounted USB storage
+under `/media`, `/run/media`, or `/mnt`; if nothing appears, open the drive in the
+Pi file manager to mount it and click **Refresh USB drives**. The panel does not
+format disks or change their permissions. A drive attached to a remote laptop is
+not a Pi USB drive: use ZIP download for that case.
+
+Exports leave original data unchanged. If a USB export fails or the Pi loses power,
+a hidden `.steel-export-*.partial` folder may remain; it is incomplete and should
+not be treated as a successful export. Re-export after reconnecting the drive.
+ZIP preparation needs local free space. Only the latest ZIP is retained in
+`data/.exports/`; preparing another export or restarting the service clears the
+previous ZIP, so download it before starting another export. USB exports are
+independent copies and are not cleared by the panel.
+
 ## Offline desktop console
 
 On a Pi with Raspberry Pi OS Desktop and Chromium, open **Steel Membrane Console**

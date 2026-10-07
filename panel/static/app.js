@@ -325,7 +325,7 @@ function displayExport(job) {
   $('export-status').hidden = !job;
   $('export-download').hidden = !job || job.mode !== 'photos' || job.status !== 'complete';
   if (!job) return;
-  $('export-status').textContent = job.status === 'running' ? `Exporting ${job.name}: ${job.completed} / ${job.total} files. Keep the USB connected.` : job.status === 'failed' ? `Export failed: ${job.error}` : job.mode === 'usb' ? `Export complete: ${job.destination}. You can now safely eject the USB drive from the Pi desktop.` : `ZIP ready: ${job.name}. Click Download ready ZIP below to save it to this computer.`;
+  $('export-status').textContent = job.status === 'running' ? `Exporting ${job.name}: ${job.completed} / ${job.total} files.${job.mode === 'usb' ? ' Keep the USB connected.' : ''}` : job.status === 'failed' ? `Export failed: ${job.error}` : job.mode === 'usb' ? `Export complete: ${job.destination}. You can now safely eject the USB drive from the Pi desktop.` : `ZIP ready: ${job.name}. Click Download ready ZIP below to save it to this computer.`;
   if (job.mode === 'photos' && job.status === 'complete') $('export-download').href = `/exports/${job.id}/download`;
   clearTimeout(exportTimer);
   if (running) exportTimer = setTimeout(pollExport, 1000);

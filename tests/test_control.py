@@ -30,36 +30,42 @@ class ControlTests(unittest.TestCase):
         self.assertFalse(self.h.snapshot()['active'])
         self.assertEqual(self.h.output(),0)
 
-    def test_minimum_duty_never_overrides_cap(self):
-        self.h.start(70,300,10)
+    def test_pid_can_use_full_output_without_user_cap(self):
+        self.h.start(70,300)
         self.h.sample([(25,23)]*3)
-        self.assertEqual(self.h.output(),10)
+        self.assertEqual(self.h.output(),100)
+
+    def test_custom_pid_is_used(self):
+        self.h.start(30,300,{'kp':8,'ki':0,'kd':0})
+        self.h.sample([(25,23)]*3)
+        self.assertEqual(self.h.output(),40)
+        self.assertEqual(self.h.snapshot()['gains'],{'kp':8,'ki':0,'kd':0})
 
     def test_raw_peak_cutoff_before_ema_or_median(self):
-        self.h.start(70,300,30)
+        self.h.start(70,300)
         self.h.sample([(25,23),(111,23),(25,23)])
         self.assertFalse(self.h.snapshot()['active'])
         self.assertTrue(self.h.snapshot()['fault'])
         self.assertEqual(self.h.hw.duty,0)
 
     def test_sensor_failure_latches_and_never_restarts_automatically(self):
-        self.h.start(70,300,30)
+        self.h.start(70,300)
         self.h.sample([])
         self.h.sample([(25,23)]*3)
         self.assertFalse(self.h.snapshot()['active'])
-        with self.assertRaises(ValueError): self.h.start(70,300,30)
+        with self.assertRaises(ValueError): self.h.start(70,300)
         self.h.clear_fault()
-        self.h.start(70,300,30)
+        self.h.start(70,300)
         self.assertTrue(self.h.snapshot()['active'])
 
     def test_nan_fails_closed(self):
-        self.h.start(70,300,30)
+        self.h.start(70,300)
         self.h.sample([(float('nan'),23)])
         self.assertFalse(self.h.snapshot()['active'])
         self.assertFalse(self.h.snapshot()['ready'])
 
     def test_duration_expiry_turns_off(self):
-        self.h.start(70,1,30)
+        self.h.start(70,1)
         self.h.sample([(25,23)]*3)
         self.h.output()
         self.time+=1.1
@@ -67,13 +73,13 @@ class ControlTests(unittest.TestCase):
         self.assertFalse(self.h.snapshot()['active'])
 
     def test_stale_sample_turns_off(self):
-        self.h.start(70,300,30)
+        self.h.start(70,300)
         self.time+=2.1
         self.assertEqual(self.h.output(),0)
         self.assertTrue(self.h.snapshot()['fault'])
 
     def test_stop_is_immediate(self):
-        self.h.start(70,300,30)
+        self.h.start(70,300)
         self.h.sample([(25,23)]*3)
         self.h.output()
         self.h.stop()
@@ -81,18 +87,18 @@ class ControlTests(unittest.TestCase):
         self.assertEqual(self.h.output(),0)
 
     def test_invalid_parameters_rejected_without_power(self):
-        for values in [(float('nan'),300,30),(110,300,30),(50,-1,30),(50,300,101),(None,300,30)]:
+        for values in [(float('nan'),300),(110,300),(50,-1),(50,300,{'kp':-1,'ki':0,'kd':0}),(None,300)]:
             with self.assertRaises(ValueError): self.h.start(*values)
         self.assertEqual(self.h.hw.duty,0)
 
     def test_disabled_and_unready_refuse_start(self):
         self.h.state['enabled']=False
-        with self.assertRaises(ValueError): self.h.start(50,300,30)
+        with self.assertRaises(ValueError): self.h.start(50,300)
         self.h.state.update(enabled=True,ready=False)
-        with self.assertRaises(ValueError): self.h.start(50,300,30)
+        with self.assertRaises(ValueError): self.h.start(50,300)
 
     def test_log_persists_samples_before_stop(self):
-        self.h.start(50,300,30)
+        self.h.start(50,300)
         self.h.sample([(26,23)]*3)
         path=next((Path(self.folder.name)/'logs').glob('*.csv'))
         self.assertEqual(len(path.read_text().splitlines()),2)
@@ -116,7 +122,7 @@ class ControlTests(unittest.TestCase):
         self.assertEqual(client.post('/api/stop',json={}).status_code,403)
         self.assertEqual(client.post('/api/stop',json={},headers={'X-Panel-Token':token,'Origin':'http://other.example'}).status_code,403)
         self.assertEqual(client.post('/api/stop',json={},headers={'X-Panel-Token':token}).status_code,200)
-        self.assertEqual(client.get('/photos/../../config.json').status_code,404)
+        self.assertIn(client.get('/photos/../../config.json').status_code,(400,404))
 
     def test_stopped_light_cannot_be_reenabled_by_old_heartbeat(self):
         camera=Camera(self.c,self.h.snapshot)

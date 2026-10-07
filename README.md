@@ -1,6 +1,6 @@
 # Steel Membrane · Imaging and Infrared Heating Panel
 
-A local web panel for Raspberry Pi 5 that combines Camera Module 3 fluorescence imaging with MLX90614 infrared temperature control. It provides live preview, timed image acquisition, a photo archive, PID heating control, and CSV temperature logs.
+A local web panel for Raspberry Pi 5 that combines Camera Module 3 fluorescence imaging with MLX90614 infrared temperature control. It provides named assays with operator records, coordinated heating and image acquisition, searchable assay folders, live preview, adjustable PID control, and CSV temperature logs.
 
 Open `http://<raspberry-pi-ip>:8080` in a browser on the same network.
 
@@ -88,7 +88,7 @@ The panel interface, status messages, and error notifications are in English.
 | Excitation illumination | Manually enables continuous illumination for fluorescence observation. The page requests that it turn off when hidden; the illumination lease expires after 15 seconds without renewal during normal operation. Continuous illumination can cause photobleaching. |
 | Capture one image | Turns on GPIO 16, waits for the default 1-second illumination warmup, saves a 4608 × 2592 JPEG, then turns off the LED unless continuous illumination is enabled. |
 | Timed acquisition | Starts the first capture immediately, then schedules subsequent captures by their start times. Missed intervals are skipped rather than queued for catch-up. Supported interval: 2–86,400 seconds; count: 1–100,000 images. |
-| Infrared heating | Accepts a target temperature, duration measured from the time Start is pressed, and an output duty-cycle cap. The cap is not a measured power limit. |
+| Infrared heating | Accepts a target temperature, duration in minutes measured from the time Start is pressed, and Kp/Ki/Kd settings. PID output is automatically bounded to 0–100%; there is no user duty-cap control. |
 | Photo archive | Provides date filtering, pagination, full-image viewing, previous/next navigation, and original-image downloads. Date filtering and filenames use UTC; displayed times use the browser's local timezone. |
 | Temperature logs | Creates a separate CSV for each heating run. Each sample is written and flushed immediately rather than waiting for program exit. |
 | Stop all | Stops heating, pending acquisition, and excitation illumination. Completed images are retained. |
@@ -97,11 +97,47 @@ Image capture preserves the original camera defaults: manual lens position **11.
 
 Heating and timed acquisition operate independently. **Closing the browser does not stop an active heating run or acquisition job.** Use Stop all before leaving if you want both stopped. The default maximum heating duration is 2 hours; output turns off when the selected duration expires.
 
+## Assay workflow
+
+1. In **Run an assay**, enter an assay name and operator name, total duration in **minutes**, target temperature, and photo interval in **seconds**.
+2. Adjust **PID settings** in the infrared heating module if needed. These gains apply to the next independent heating run or assay; they cannot be changed during an active run.
+3. Select **Start assay**. The duration includes heating up; the clock does not wait for the target temperature. The first capture is scheduled immediately, followed by captures at the selected interval while time remains. The illumination warmup and camera processing may delay a capture; missed intervals are not replayed.
+4. Heating and acquisition stop together at the end of the assay. **Stop assay** and **Stop all** end the run early without deleting saved data. A camera or temperature-control fault also ends the assay and records the failure reason.
+5. Open **Photo archive**, select an operator or search by assay name, and open an assay folder. **View temperature logs** opens the corresponding CSV records.
+
+Each run gets a unique ID, even when the assay name and operator are repeated. The manifest stores the name, operator, target, duration, interval, PID gains, start/end times, and run status. Operator names are searchable labels, not authenticated accounts or access restrictions. All users on this shared panel can see the archive.
+
+An assay owns both instruments while it runs. Independent start controls are blocked to prevent overlapping jobs. Independent runs still work outside an assay; their data and all existing pre-assay files appear under **Unassigned**. No existing files are relabeled or moved automatically.
+
+Data is stored on disk as:
+
+```text
+data/
+  assays/
+    <UTC-timestamp>_<unique-id>/
+      assay.json
+      photos/  # JPEG originals, thumbnails, JSON metadata
+      logs/    # CSV logs with assay identity and PID gains
+  photos/      # Unassigned images
+  logs/        # Unassigned logs
+  .trash/      # Recoverable deletions
+```
+
+Service restarts do not resume assays. Runs that were active are marked **interrupted**, and outputs remain off. Closing the browser does not stop the assay.
+
+## Deleting and restoring data
+
+- Open a photo and choose **Delete photo** to remove its original, thumbnail, and metadata together.
+- Choose **Delete** beside a temperature log to remove that CSV, or **Delete assay folder** to remove an entire assay and its data.
+- Each action asks for confirmation and moves data into `data/.trash/`, rather than permanently erasing it. Running assays and files still being written cannot be deleted.
+- Use **Undo deletion** to restore the most recently deleted item in the current page session. Restore does not overwrite existing files. To restore several earlier deletions after a page reload, the retained `.trash/<deletion-id>/manifest.json` records each original path and the stored file names for manual recovery.
+- Trash is retained without automatic purging, so deletion does not immediately reclaim disk space. Include it in backups if recovery is needed.
+
 ## Temperature control and protection
 
-The controller retains the original PID defaults: `Kp=12`, `Ki=0.05`, and `Kd=0.1`. Every five 0.1-second cycles, it switches heating output off for infrared sampling. Three readings are combined using a median and an exponential moving average (EMA).
+The editable PID controls start with the device defaults: `Kp=12`, `Ki=0.05`, and `Kd=0.1`. Every five 0.1-second cycles, it switches heating output off for infrared sampling. Three readings are combined using a median and an exponential moving average (EMA).
 
-Sensor failures, invalid values, stale readings, or a raw sample reaching the default **110 °C** cutoff latch heating off. Once valid readings return and the temperature is below the cutoff, clear the fault manually before starting another run. Cutoff detection checks individual raw readings before median/EMA filtering. The duty-cycle cap is applied after the minimum-duty rule, so minimum duty cannot override the cap.
+Sensor failures, invalid values, stale readings, or a raw sample reaching the default **110 °C** cutoff latch heating off. Once valid readings return and the temperature is below the cutoff, clear the fault manually before starting another run. Cutoff detection checks individual raw readings before median/EMA filtering. PID gains can be configured before a run, from 0 to 1000 each, with at least one nonzero gain. The existing minimum-duty rule and output slew setting remain in the device configuration; final output never exceeds 100%. Old `duty_cap` entries in local configuration are ignored.
 
 The legacy `temp.py` software emissivity correction was incorrect for emissivity values other than 1. This implementation uses the MLX90614's reported temperature directly and does not modify its EEPROM. This matches the legacy behavior with software emissivity set to 1. Infrared measurements of metal depend on surface emissivity, reflected radiation, and the sensor's field of view; validate the measurements and tune the PID after installing the sensor.
 
@@ -116,8 +152,10 @@ Software protection depends on the sensor, operating system, and application. Ke
 | `panel/` | Web application, camera control, and temperature control | Yes |
 | `config.example.json` | Default configuration for new installations | Yes |
 | `config.json` | Settings specific to the current device | No |
-| `data/photos/` | Original images, thumbnails, and per-image JSON metadata | No |
-| `data/logs/` | Temperature CSV files | No |
+| `data/assays/<assay-id>/` | Assay manifest, photos, metadata, and temperature logs | No |
+| `data/.trash/` | Recoverable deleted files and deletion manifests | No |
+| `data/photos/` | Unassigned / standalone images, thumbnails, and JSON metadata | No |
+| `data/logs/` | Unassigned / standalone temperature CSV files | No |
 | `.venv/` | Python environment | No |
 
 Image metadata includes the capture time, camera settings, and temperature state at capture. SSH passwords, access tokens, and private keys must not be committed.

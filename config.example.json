@@ -18,7 +18,6 @@
   "kd": 0.1,
   "ema": 0.3,
   "min_duty": 30,
-  "duty_cap": 100,
   "slew": 999,
   "burst": false,
   "lens_position": 11.5,

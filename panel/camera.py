@@ -23,7 +23,8 @@ class Camera:
         self.job = None
         self.single = False
         self.state = dict(ready=False, error=None, preview_light=False, running=False,
-                          captured=0, count=0, interval_s=30, latest=None, busy=False)
+                          captured=0, count=0, interval_s=30, latest=None, busy=False,
+                          assay_id=None)
         self.photos = Path(config['data_dir'])/'photos'
         self.photos.mkdir(parents=True, exist_ok=True)
 
@@ -33,7 +34,7 @@ class Camera:
 
     def snapshot(self):
         with self.lock:
-            return dict(self.state)
+            return dict(self.state, pending=self.single)
 
     def light(self, enabled, renew=False):
         with self.lock:
@@ -46,12 +47,16 @@ class Camera:
             if not enabled and self.led and not self.state['busy']:
                 self.led.off()
 
-    def start(self, interval, count):
+    def validate(self, interval, count):
         if (isinstance(interval, bool) or not isinstance(interval,(int,float))
             or not math.isfinite(interval) or not 2 <= interval <= 86400):
             raise ValueError('Capture interval must be between 2 and 86400 seconds')
         if isinstance(count, bool) or not isinstance(count,int) or not 1 <= count <= 100000:
             raise ValueError('Photo count must be an integer between 1 and 100000')
+
+    def start(self, interval, count, context=None, deadline=None):
+        self.validate(interval, count)
+        context = dict(context or {})
         with self.lock:
             if not self.state['ready']:
                 raise ValueError('Camera not ready')
@@ -60,8 +65,9 @@ class Camera:
             self.cancel.clear()
             self.generation += 1
             self.job = dict(interval=interval, count=count, next=time.monotonic(),
-                            generation=self.generation)
-            self.state.update(running=True, captured=0, count=count, interval_s=interval, error=None)
+                            generation=self.generation, context=context, deadline=deadline)
+            self.state.update(running=True, captured=0, count=count, interval_s=interval,
+                              error=None, assay_id=context.get('id'))
 
     def capture(self):
         with self.lock:
@@ -71,6 +77,7 @@ class Camera:
                 raise ValueError('Wait for the current capture to finish')
             self.cancel.clear()
             self.single = True
+            self.state.update(assay_id=None, error=None)
 
     def stop(self):
         # Wake warmup immediately; generation prevents a stopped job being revived.
@@ -84,11 +91,14 @@ class Camera:
             if self.led:
                 self.led.off()
 
-    def save(self):
-        if shutil.disk_usage(self.photos).free < 250*1024*1024:
+    def save(self, context=None, deadline=None):
+        context = dict(context or {})
+        folder = self.photos if not context else Path(self.c['data_dir'])/'assays'/context['id']/'photos'
+        folder.mkdir(parents=True, exist_ok=True)
+        if shutil.disk_usage(folder).free < 250*1024*1024:
             raise RuntimeError('Less than 250 MB of disk space remains. Acquisition stopped.')
         with self.lock:
-            if self.cancel.is_set():
+            if self.cancel.is_set() or (deadline is not None and time.monotonic() >= deadline):
                 return False
             self.state['busy'] = True
             self.led.on()
@@ -99,16 +109,18 @@ class Camera:
             # queue=False ensures a fresh exposure after illumination warmup.
             request = self.cam.capture_request()
             try:
-                if self.cancel.is_set():
+                if self.cancel.is_set() or (deadline is not None and time.monotonic() >= deadline):
                     return False
-                request.save('main', str(self.photos/(name+'.pending')), format='JPEG')
+                request.save('main', str(folder/(name+'.pending')), format='JPEG')
                 picture = request.make_image('main')
                 picture.thumbnail((480,270))
-                picture.save(self.photos/(name+'.thumb.jpg'), 'JPEG', quality=80)
+                picture.save(folder/(name+'.thumb.jpg'), 'JPEG', quality=80)
                 meta = dict(id=name, utc=datetime.now(timezone.utc).isoformat(),
-                            temperature=self.temperature(), camera=request.get_metadata())
-                (self.photos/(name+'.json')).write_text(json.dumps(meta,default=str),encoding='utf-8')
-                (self.photos/(name+'.pending')).replace(self.photos/(name+'.jpg'))
+                            temperature=self.temperature(), camera=request.get_metadata(),
+                            assay_id=context.get('id'), assay_name=context.get('name'),
+                            operator=context.get('operator'))
+                (folder/(name+'.json')).write_text(json.dumps(meta,default=str),encoding='utf-8')
+                (folder/(name+'.pending')).replace(folder/(name+'.jpg'))
                 with self.lock:
                     self.state['latest'] = name
                 return True
@@ -120,23 +132,26 @@ class Camera:
                 if time.monotonic() >= self.lease or self.cancel.is_set():
                     self.led.off()
 
+    def open_hardware(self):
+        from picamera2 import Picamera2
+        from libcamera import controls
+        from gpiozero import DigitalOutputDevice
+        self.led = DigitalOutputDevice(self.c['led_gpio'],
+                                      active_high=not self.c['led_active_low'], initial_value=False)
+        self.cam = Picamera2()
+        self.cam.configure(self.cam.create_still_configuration(
+            main={'size':(self.c['photo_width'],self.c['photo_height'])},
+            buffer_count=3, queue=False))
+        camera_controls = {'AeEnable':True,'AwbEnable':True}
+        if 'AfMode' in self.cam.camera_controls:
+            camera_controls.update(AfMode=controls.AfModeEnum.Manual,
+                                   LensPosition=self.c['lens_position'])
+        self.cam.set_controls(camera_controls)
+        self.cam.start()
+
     def run(self):
         try:
-            from picamera2 import Picamera2
-            from libcamera import controls
-            from gpiozero import DigitalOutputDevice
-            self.led = DigitalOutputDevice(self.c['led_gpio'],
-                                          active_high=not self.c['led_active_low'], initial_value=False)
-            self.cam = Picamera2()
-            self.cam.configure(self.cam.create_still_configuration(
-                main={'size':(self.c['photo_width'],self.c['photo_height'])},
-                buffer_count=3, queue=False))
-            camera_controls = {'AeEnable':True,'AwbEnable':True}
-            if 'AfMode' in self.cam.camera_controls:
-                camera_controls.update(AfMode=controls.AfModeEnum.Manual,
-                                       LensPosition=self.c['lens_position'])
-            self.cam.set_controls(camera_controls)
-            self.cam.start()
+            self.open_hardware()
             with self.lock:
                 self.state['ready'] = True
             while not self.quit.is_set():
@@ -145,12 +160,18 @@ class Camera:
                     light = start < self.lease
                     self.state['preview_light'] = light
                     self.led.value = light
+                    if self.job and self.job.get('deadline') is not None and start >= self.job['deadline']:
+                        self.job = None
+                        self.state['running'] = False
                     job = dict(self.job) if self.job and start >= self.job['next'] else None
                     single = self.single
                     self.single = False
+                    if job or single:
+                        self.state['busy'] = True
                 if job or single:
                     try:
-                        saved = self.save()
+                        saved = self.save(job.get('context') if job else None,
+                                          job.get('deadline') if job else None)
                         with self.lock:
                             if saved and job and self.job and job['generation'] == self.generation:
                                 self.state['captured'] += 1
@@ -164,6 +185,9 @@ class Camera:
                         self.stop()
                         with self.lock:
                             self.state['error'] = str(exc)
+                    finally:
+                        with self.lock:
+                            self.state['busy'] = False
                 request = self.cam.capture_request()
                 try:
                     picture = request.make_image('main')

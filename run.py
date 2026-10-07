@@ -14,6 +14,7 @@ def main():
     fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
     app=create_app(config)
     heater,camera=app.extensions['heater'],app.extensions['camera']
+    assays=app.extensions['assays']
     def shutdown(*_):
         raise SystemExit(0)
     signal.signal(signal.SIGTERM,shutdown)
@@ -21,10 +22,14 @@ def main():
     try:
         heater.launch()
         camera.launch()
+        assays.launch()
         serve(app,host=config['host'],port=config['port'],threads=8)
     finally:
         try:
-            heater.close()
+            try:
+                assays.close()
+            finally:
+                heater.close()
         finally:
             camera.close()
             lock.close()

@@ -41,7 +41,8 @@ class Heater:
         self.last_sample = 0
         self.state = dict(ready=False, enabled=config['heater_enabled'], active=False,
                           temperature=None, ambient=None, filtered=None, target=None,
-                          duty=0, fault=None, remaining_s=0, log=None)
+                          duty=0, fault=None, remaining_s=0, log=None, assay_id=None,
+                          gains={k: config[k] for k in ('kp', 'ki', 'kd')})
 
     def launch(self):
         self.thread = threading.Thread(target=self.run, daemon=True, name='heater')
@@ -74,13 +75,22 @@ class Heater:
         with self.lock:
             self._stop()
 
-    def start(self, target, duration, duty_cap):
+    def validate(self, target, duration, gains=None):
+        gains = gains if gains is not None else {k: self.c[k] for k in ('kp','ki','kd')}
+        if not isinstance(gains, dict) or set(gains) != {'kp','ki','kd'}:
+            raise ValueError('Provide Kp, Ki, and Kd')
         if not all(isinstance(x, (float, int)) and not isinstance(x, bool) and math.isfinite(x)
-                   for x in (target, duration, duty_cap)):
+                   for x in (target, duration, *gains.values())):
             raise ValueError('Parameters must be finite numbers')
-        if not (0 < target < self.c['cutoff_c'] and 1 <= duration <= self.c['max_duration_s']
-                and 0 < duty_cap <= self.c['duty_cap']):
-            raise ValueError('Target temperature, duration, or duty cap is out of range')
+        if not (0 < target < self.c['cutoff_c'] and 1 <= duration <= self.c['max_duration_s']):
+            raise ValueError('Target temperature or duration is out of range')
+        if any(not 0 <= x <= 1000 for x in gains.values()) or not any(gains.values()):
+            raise ValueError('PID gains must be between 0 and 1000, with at least one nonzero gain')
+        return dict(gains)
+
+    def start(self, target, duration, gains=None, context=None):
+        gains = self.validate(target, duration, gains)
+        context = dict(context or {})
         with self.lock:
             if not self.state['enabled']:
                 raise ValueError('Heating is disabled. Check the wiring and enable it in config.json.')
@@ -92,17 +102,22 @@ class Heater:
                 raise ValueError('Heating is already active. Stop it first.')
             if self.state['temperature'] >= self.c['cutoff_c']:
                 raise ValueError('Temperature exceeds the safety cutoff')
-            folder = Path(self.c['data_dir'])/'logs'
+            folder = Path(self.c['data_dir'])
+            if context:
+                folder = folder/'assays'/context['id']
+            folder = folder/'logs'
             folder.mkdir(parents=True, exist_ok=True)
             name = datetime.now(timezone.utc).strftime('heat_%Y%m%dT%H%M%S_%fZ.csv')
             self.log = (folder/name).open('w', newline='', encoding='utf-8')
             self.writer = csv.writer(self.log)
-            self.writer.writerow(['utc','object_c','ambient_c','filtered_c','target_c','duty_pct'])
+            self.writer.writerow(['utc','object_c','ambient_c','filtered_c','target_c','duty_pct',
+                                  'assay_id','assay_name','operator','kp','ki','kd'])
             self.log.flush()
-            self.pid = PID(self.c['kp'], self.c['ki'], self.c['kd'], target)
-            self.cap = duty_cap
+            self.pid = PID(gains['kp'], gains['ki'], gains['kd'], target)
+            self.context = context
             self.deadline = self.clock()+duration
-            self.state.update(active=True, target=target, log=name, duty=0)
+            self.state.update(active=True, target=target, log=name, duty=0,
+                              assay_id=context.get('id'), gains=gains)
 
     def clear_fault(self):
         with self.lock:
@@ -134,14 +149,19 @@ class Heater:
                     requested = self.pid.update(ema, self.clock())
                     if ema < self.pid.target:
                         requested = max(requested, self.c['min_duty'])
-                    # Apply caps LAST, so minimum duty can never override the user's cap.
-                    self.state['duty'] = min(requested, self.cap,
+                    self.state['duty'] = min(requested, 100,
                                              self.state['duty']+self.c['slew'])
             self.history.append(dict(t=time.time(), temperature=obj, target=self.state['target'],
                                      duty=self.state['duty']))
             if self.writer:
+                # Prefix formula-like user text for safe viewing in spreadsheet programs.
+                def cell(value):
+                    return "'"+value if value.lstrip().startswith(('=', '+', '-', '@')) else value
                 self.writer.writerow([datetime.now(timezone.utc).isoformat(), obj, amb, ema,
-                                      self.state['target'], self.state['duty']])
+                                      self.state['target'], self.state['duty'],
+                                      self.context.get('id',''), cell(self.context.get('name','')),
+                                      cell(self.context.get('operator','')),
+                                      self.pid.kp,self.pid.ki,self.pid.kd])
                 self.log.flush()
 
     def output(self):

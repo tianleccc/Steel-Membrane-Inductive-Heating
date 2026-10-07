@@ -4,7 +4,7 @@
   <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
   <meta name="panel-token" content="{{ token }}">
   <title>Steel Membrane · Instrument Panel</title>
-  <link rel="stylesheet" href="/static/style.css?v=en-1">
+  <link rel="stylesheet" href="/static/style.css?v=assay-1">
 </head>
 <body>
   <header><a class="brand" href="/"><span class="mark">S<span>M</span></span><span>STEEL MEMBRANE<small>Imaging & induction heating</small></span></a><div class="header-right"><span id="connection" class="pill">Connecting</span><button id="stop-all" class="danger">■ Stop all</button></div></header>
@@ -12,7 +12,24 @@
     <div class="intro"><div><span class="eyebrow">INSTRUMENT WORKSPACE</span><h1>Every observation, recorded.</h1><p>Control fluorescence imaging and temperature in one workspace.</p></div><div class="device">RASPBERRY PI 5<small>Camera Module 3 / MLX90614</small><span id="disk">Reading device status…</span></div></div>
     <nav><button class="tab active" data-tab="live">Workspace</button><button class="tab" data-tab="gallery">Photo archive <span id="photo-count">—</span></button><button class="tab" data-tab="logs">Temperature logs</button></nav>
     <div id="message" role="status" hidden></div>
+    <div id="undo-bar" hidden><span>Item moved to Trash.</span><button id="undo-delete" class="text-button">Undo deletion</button><button id="dismiss-undo" class="text-button" aria-label="Dismiss undo notification">×</button></div>
     <section id="live" class="tab-view">
+      <article class="card assay-card">
+        <div class="card-head"><div><span class="eyebrow">EXPERIMENT / ASSAY</span><h2>Run an assay</h2><p>One experiment. One folder. Photos and temperature logs, together.</p></div><span id="assay-status" class="pill">Ready to configure</span></div>
+        <form id="assay-form"><fieldset id="assay-fields"><div class="assay-identity">
+          <label>Assay name<input id="assay-name" type="text" maxlength="120" placeholder="e.g. Membrane stability · Trial 01" required></label>
+          <label>Operator<input id="assay-operator" type="text" maxlength="80" placeholder="Your name" list="operator-names" autocomplete="name" required></label>
+        </div><div class="assay-settings">
+          <label>Total duration<div class="unit-input"><input id="assay-duration" type="number" min="0.1" step="0.1" max="{{ max_duration }}" value="10" required><span>min</span></div></label>
+          <label>Target temperature<div class="unit-input"><input id="assay-target" type="number" min="1" step="0.1" max="{{ cutoff - 0.1 }}" value="50" required><span>°C</span></div></label>
+          <label>Photo interval<div class="unit-input"><input id="assay-interval" type="number" min="2" step="0.1" max="86400" value="30" required><span>sec</span></div></label>
+        </div></fieldset><div class="assay-actions"><p id="assay-plan">First photo immediately. Uses the PID settings below.</p><button id="start-assay" class="primary" type="submit">Start assay →</button><button id="stop-assay" class="secondary" type="button" disabled>Stop assay</button></div></form>
+        <div id="assay-run" hidden><strong id="assay-run-name"></strong><span id="assay-run-detail"></span><progress id="assay-progress" max="1" value="0"></progress></div>
+        <p class="hint">Time starts when you press Start assay, including heating up. Heating and acquisition stop together at the end or if either instrument fails. Runs continue if the browser is closed.</p>
+        <div id="assay-error" class="inline-error" hidden></div>
+      </article>
+      <datalist id="operator-names"></datalist>
+      <div class="module-heading"><span class="eyebrow">INDEPENDENT INSTRUMENT CONTROLS</span><span>Manual controls are locked while an assay is running.</span></div>
       <div class="workspace">
         <article class="card imaging"><div class="card-head"><div><span class="eyebrow">01 / IMAGING</span><h2>Live preview</h2></div><span id="camera-status" class="pill">Starting camera</span></div>
           <div class="preview"><img id="preview" alt="Live camera preview" hidden><div id="preview-empty"><span class="viewfinder">⌗</span><strong>Waiting for camera</strong><span>Live preview will appear when the camera is ready.</span></div><span class="live-label"><i></i> LIVE VIEW</span><span class="preview-tag">Full-resolution photos · Reduced-resolution preview</span></div>
@@ -25,16 +42,36 @@
           <div class="temperature"><span id="temp">—</span><span>°C</span></div><div class="temp-caption">MLX90614 · Object temperature</div>
           <div class="metrics"><div><span>Ambient temperature</span><strong id="ambient">— °C</strong></div><div><span>Duty cycle</span><strong id="duty">0 %</strong></div><div><span>Time remaining</span><strong id="remaining">—</strong></div></div>
           <div class="chart-wrap"><canvas id="chart" aria-label="Recent temperature trend"></canvas><span class="chart-label">Last 10 minutes · °C</span></div>
-          <form id="heat-form"><div class="heat-fields"><label>Target temperature <div class="unit-input"><input id="target" type="number" min="1" max="{{ cutoff - 0.1 }}" step="0.1" value="50" required><span>°C</span></div></label><label>Duration <div class="unit-input"><input id="duration" type="number" min="1" max="{{ max_duration }}" value="300" required><span>sec</span></div></label><label>Duty cap <div class="unit-input"><input id="cap" type="number" min="1" max="{{ max_duty }}" value="30" required><span>%</span></div></label></div><div class="heat-actions"><button id="start-heat" class="primary" type="submit">Start heating →</button><button id="stop-heat" type="button" class="secondary">Stop heating</button></div></form>
+          <form id="heat-form"><div class="heat-fields">
+            <label>Target temperature<div class="unit-input"><input id="target" type="number" min="1" max="{{ cutoff - 0.1 }}" step="0.1" value="50" required><span>°C</span></div></label>
+            <label>Duration<div class="unit-input"><input id="duration" type="number" min="0.1" step="0.1" max="{{ max_duration }}" value="5" required><span>min</span></div></label>
+          </div><fieldset id="pid-fields"><legend>PID settings</legend><div class="pid-grid">
+            <label>Kp · Proportional<input id="kp" type="number" min="0" max="1000" step="any" value="{{ pid.kp }}" required></label>
+            <label>Ki · Integral<input id="ki" type="number" min="0" max="1000" step="any" value="{{ pid.ki }}" required></label>
+            <label>Kd · Derivative<input id="kd" type="number" min="0" max="1000" step="any" value="{{ pid.kd }}" required></label>
+          </div><p class="hint">Applies to the next heating run or assay. PID adjusts output automatically between 0 and 100%.</p></fieldset>
+          <p id="pid-used" class="hint" hidden></p>
+          <div class="heat-actions"><button id="start-heat" class="primary" type="submit">Start heating →</button><button id="stop-heat" type="button" class="secondary">Stop heating</button></div></form>
           <p class="hint">{{ cutoff }} °C cutoff · Automatic stop on sensor failure<br>Heating and acquisition run independently. Closing the browser does not stop active jobs.</p><div id="heater-error" class="inline-error" hidden></div><button id="reset" class="text-button">Clear heating fault</button>
         </article>
       </div>
       <div class="footnote"><span>● Heating and excitation light stay off after startup or restart</span><span>Photos include timestamps, camera settings, and temperature records</span></div>
     </section>
-    <section id="gallery" class="tab-view" hidden><div class="section-head"><div><span class="eyebrow">OBSERVATION ARCHIVE</span><h2>Photo archive</h2><p>Browse your observations by time. Select a photo to view and download the original.</p></div><div><label>Capture date (UTC) <input id="filter-date" type="date"></label><button id="refresh-gallery" class="secondary">Refresh</button></div></div><div id="gallery-grid"></div><div class="pagination"><button id="prev-page" class="secondary">← Previous page</button><span id="page-info">Page 1</span><button id="next-page" class="secondary">Next page →</button></div></section>
-    <section id="logs" class="tab-view" hidden><div class="section-head"><div><span class="eyebrow">EXPERIMENT RECORDS</span><h2>Temperature logs</h2><p>Each heating run has its own CSV with object, ambient, and target temperatures plus duty cycle.</p></div><button id="refresh-logs" class="secondary">Refresh</button></div><div id="log-list"></div></section>
+    <section id="gallery" class="tab-view" hidden>
+      <div class="section-head"><div><span class="eyebrow">OBSERVATION ARCHIVE</span><h2 id="gallery-title">Assay folders</h2><p id="gallery-description">Find your experiments by operator or assay name.</p></div><button id="refresh-gallery" class="secondary">Refresh</button></div>
+      <div id="folder-filters" class="archive-filters"><label>Operator<select id="archive-operator"><option value="">All operators</option></select></label><label>Find an assay<input id="assay-search" type="search" placeholder="Assay name or operator"></label></div>
+      <div id="folder-grid" class="folder-grid"></div>
+      <div id="photo-browser" hidden>
+        <div class="archive-filters"><button id="back-folders" class="secondary">← All assay folders</button><label>Capture date (UTC)<input id="filter-date" type="date"></label><button id="folder-logs" class="secondary">View temperature logs</button><button id="delete-assay" class="danger">Delete assay folder</button></div>
+        <div id="folder-summary" class="folder-summary"></div>
+        <div id="gallery-grid"></div><div class="pagination"><button id="prev-page" class="secondary">← Previous page</button><span id="page-info">Page 1</span><button id="next-page" class="secondary">Next page →</button></div>
+      </div>
+    </section>
+    <section id="logs" class="tab-view" hidden><div class="section-head"><div><span class="eyebrow">EXPERIMENT RECORDS</span><h2>Temperature logs</h2><p>Download or delete logs associated with each assay. Independent runs are under Unassigned.</p></div><button id="refresh-logs" class="secondary">Refresh</button></div>
+      <div class="archive-filters"><label>Operator<select id="log-operator"><option value="">All operators</option></select></label><label>Assay<select id="log-assay"><option value="">All assays</option></select></label></div><div id="log-list"></div>
+    </section>
   </main>
   <footer><span>STEEL MEMBRANE / LAB INSTRUMENTS</span><span>Local acquisition · Traceable records</span></footer>
-  <dialog id="photo-dialog"><div class="dialog-head"><span id="photo-title"></span><button id="close-photo" class="secondary">Close ×</button></div><img id="full-photo" alt="Archived photo"><div class="dialog-foot"><button id="previous-photo" class="secondary">← Previous photo</button><a id="download-photo" class="primary" download>Download original ↓</a><button id="next-photo" class="secondary">Next photo →</button></div></dialog>
-  <script src="/static/app.js?v=en-1" defer></script>
+  <dialog id="photo-dialog"><div class="dialog-head"><span id="photo-title"></span><button id="close-photo" class="secondary">Close ×</button></div><img id="full-photo" alt="Archived photo"><div class="dialog-foot"><button id="previous-photo" class="secondary">← Previous photo</button><button id="delete-photo" class="danger">Delete photo</button><a id="download-photo" class="primary" download>Download original ↓</a><button id="next-photo" class="secondary">Next photo →</button></div></dialog>
+  <script src="/static/app.js?v=assay-1" defer></script>
 </body></html>

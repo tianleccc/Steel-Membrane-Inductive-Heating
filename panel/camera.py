@@ -38,9 +38,9 @@ class Camera:
     def light(self, enabled, renew=False):
         with self.lock:
             if enabled and not self.state['ready']:
-                raise ValueError('相机未就绪')
+                raise ValueError('Camera not ready')
             if renew and (not enabled or time.monotonic() >= self.lease):
-                raise ValueError('激发光已关闭，需要手动重新开启')
+                raise ValueError('Excitation light is off. Enable it manually to resume.')
             self.lease = time.monotonic()+15 if enabled else 0
             self.state['preview_light'] = bool(enabled)
             if not enabled and self.led and not self.state['busy']:
@@ -49,14 +49,14 @@ class Camera:
     def start(self, interval, count):
         if (isinstance(interval, bool) or not isinstance(interval,(int,float))
             or not math.isfinite(interval) or not 2 <= interval <= 86400):
-            raise ValueError('拍照间隔必须为 2–86400 秒')
+            raise ValueError('Capture interval must be between 2 and 86400 seconds')
         if isinstance(count, bool) or not isinstance(count,int) or not 1 <= count <= 100000:
-            raise ValueError('照片数量必须为 1–100000 的整数')
+            raise ValueError('Photo count must be an integer between 1 and 100000')
         with self.lock:
             if not self.state['ready']:
-                raise ValueError('相机未就绪')
+                raise ValueError('Camera not ready')
             if self.job or self.single or self.state['busy']:
-                raise ValueError('拍照任务正在运行')
+                raise ValueError('An acquisition job is already running')
             self.cancel.clear()
             self.generation += 1
             self.job = dict(interval=interval, count=count, next=time.monotonic(),
@@ -66,9 +66,9 @@ class Camera:
     def capture(self):
         with self.lock:
             if not self.state['ready']:
-                raise ValueError('相机未就绪')
+                raise ValueError('Camera not ready')
             if self.job or self.single or self.state['busy']:
-                raise ValueError('请等待当前拍照任务完成')
+                raise ValueError('Wait for the current capture to finish')
             self.cancel.clear()
             self.single = True
 
@@ -86,7 +86,7 @@ class Camera:
 
     def save(self):
         if shutil.disk_usage(self.photos).free < 250*1024*1024:
-            raise RuntimeError('磁盘剩余空间不足 250 MB，已停止拍照')
+            raise RuntimeError('Less than 250 MB of disk space remains. Acquisition stopped.')
         with self.lock:
             if self.cancel.is_set():
                 return False
@@ -177,7 +177,7 @@ class Camera:
                 self.quit.wait(max(0,0.25-(time.monotonic()-start)))
         except Exception as exc:
             with self.lock:
-                self.state['error'] = f'相机初始化/运行失败: {exc}'
+                self.state['error'] = f'Camera initialization or operation failed: {exc}'
         finally:
             self.stop()
             with self.lock:

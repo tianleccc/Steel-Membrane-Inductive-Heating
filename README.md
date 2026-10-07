@@ -80,7 +80,7 @@ Each startup leaves heating, excitation illumination, and acquisition jobs off. 
 
 ## Using the panel
 
-The current panel interface is in Chinese; the descriptions below explain its controls in English.
+The panel interface, status messages, and error notifications are in English.
 
 | Feature | Behavior |
 |---|---|

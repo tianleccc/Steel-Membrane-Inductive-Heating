@@ -77,21 +77,21 @@ class Heater:
     def start(self, target, duration, duty_cap):
         if not all(isinstance(x, (float, int)) and not isinstance(x, bool) and math.isfinite(x)
                    for x in (target, duration, duty_cap)):
-            raise ValueError('参数必须是有限数值')
+            raise ValueError('Parameters must be finite numbers')
         if not (0 < target < self.c['cutoff_c'] and 1 <= duration <= self.c['max_duration_s']
                 and 0 < duty_cap <= self.c['duty_cap']):
-            raise ValueError('目标温度、加热时长或功率上限超出范围')
+            raise ValueError('Target temperature, duration, or duty cap is out of range')
         with self.lock:
             if not self.state['enabled']:
-                raise ValueError('加热尚未启用：请先确认接线并修改 config.json')
+                raise ValueError('Heating is disabled. Check the wiring and enable it in config.json.')
             if not self.state['ready'] or self.clock()-self.last_sample > 2:
-                raise ValueError('温度传感器未就绪或读数已过期')
+                raise ValueError('Temperature sensor is not ready or its readings are stale')
             if self.state['fault']:
-                raise ValueError('请先排除故障并点击清除故障')
+                raise ValueError('Resolve the fault first, then select Clear heating fault')
             if self.state['active']:
-                raise ValueError('加热正在运行，请先停止')
+                raise ValueError('Heating is already active. Stop it first.')
             if self.state['temperature'] >= self.c['cutoff_c']:
-                raise ValueError('温度超过保护阈值')
+                raise ValueError('Temperature exceeds the safety cutoff')
             folder = Path(self.c['data_dir'])/'logs'
             folder.mkdir(parents=True, exist_ok=True)
             name = datetime.now(timezone.utc).strftime('heat_%Y%m%dT%H%M%S_%fZ.csv')
@@ -107,9 +107,9 @@ class Heater:
     def clear_fault(self):
         with self.lock:
             if self.state['active'] or not self.state['ready'] or self.clock()-self.last_sample > 2:
-                raise ValueError('需要新鲜、有效的温度读数，且加热已停止')
+                raise ValueError('Heating must be stopped and valid, recent temperature readings are required')
             if self.state['temperature'] >= self.c['cutoff_c']:
-                raise ValueError('温度仍超过保护阈值')
+                raise ValueError('Temperature still exceeds the safety cutoff')
             self.state['fault'] = None
 
     def sample(self, readings):
@@ -118,7 +118,7 @@ class Heater:
             if not readings or any(not math.isfinite(o) or not math.isfinite(a)
                                    or not -40 < o < 300 or not -40 < a < 125 for o,a in readings):
                 self.state['ready'] = False
-                self._stop('红外温度读数无效；加热已锁定关闭')
+                self._stop('Invalid infrared temperature reading. Heating is latched off.')
                 return
             obj, amb = median(o for o,a in readings), median(a for o,a in readings)
             old = self.state['filtered']
@@ -126,7 +126,7 @@ class Heater:
             self.last_sample = self.clock()
             self.state.update(ready=True, temperature=obj, ambient=amb, filtered=ema)
             if max(o for o,a in readings) >= self.c['cutoff_c']:
-                self._stop('红外温度达到过温保护阈值')
+                self._stop('Infrared temperature reached the safety cutoff')
             if self.state['active']:
                 if self.clock() >= self.deadline:
                     self._stop()
@@ -153,7 +153,7 @@ class Heater:
                 self._stop()
                 return 0
             if self.clock()-self.last_sample > 2:
-                self._stop('温度读数超时')
+                self._stop('Temperature reading timed out')
                 return 0
             duty = self.state['duty']
             self.hw.set_duty(100 if self.c['burst'] and duty else duty)
@@ -180,7 +180,7 @@ class Heater:
                     except Exception as exc:
                         with self.lock:
                             self.state['ready'] = False
-                            self._stop(f'MLX90614 读取失败: {exc}')
+                            self._stop(f'MLX90614 read failed: {exc}')
                 duty = self.output()
                 remaining = max(0, self.c['cycle_s']-(self.clock()-start))
                 if self.c['burst']:
@@ -193,7 +193,7 @@ class Heater:
                 index += 1
         except Exception as exc:
             with self.lock:
-                self.state.update(ready=False, fault=f'温控初始化/运行失败: {exc}')
+                self.state.update(ready=False, fault=f'Temperature control initialization or operation failed: {exc}')
         finally:
             with self.lock:
                 self._stop()

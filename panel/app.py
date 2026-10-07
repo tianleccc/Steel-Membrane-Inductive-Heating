@@ -69,7 +69,7 @@ def create_app(config=None, heater=None, camera=None):
     def body():
         data=request.get_json()
         if not isinstance(data,dict):
-            raise ValueError('请求格式错误')
+            raise ValueError('Invalid request format')
         return data
 
     @app.get('/')
@@ -125,7 +125,7 @@ def create_app(config=None, heater=None, camera=None):
         enabled=data.get('enabled')
         renew=data.get('renew',False)
         if not isinstance(enabled,bool) or not isinstance(renew,bool):
-            raise ValueError('enabled 必须为布尔值')
+            raise ValueError('enabled and renew must be boolean values')
         camera.light(enabled,renew=renew)
         return jsonify(ok=True)
 
@@ -151,7 +151,7 @@ def create_app(config=None, heater=None, camera=None):
         page=max(0,int(request.args.get('page',0)))
         date=request.args.get('date','').replace('-','')
         if date and not re.fullmatch(r'\d{8}',date):
-            raise ValueError('日期格式错误')
+            raise ValueError('Invalid date format')
         files=sorted((p for p in camera.photos.glob(f'{date}*.jpg')
                       if not p.name.endswith('.thumb.jpg')),reverse=True)
         items=[]

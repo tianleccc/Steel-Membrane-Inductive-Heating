@@ -11,7 +11,7 @@ import zipfile
 
 
 def usb_drives():
-    result = subprocess.run(['lsblk', '-J', '-o', 'PATH,TRAN,MOUNTPOINTS,LABEL,RO'],
+    result = subprocess.run(['lsblk', '-J', '--tree', '-o', 'PATH,TRAN,MOUNTPOINTS,LABEL,RO'],
                             capture_output=True, text=True, check=True, timeout=5)
     drives = []
     def visit(device, usb=False):

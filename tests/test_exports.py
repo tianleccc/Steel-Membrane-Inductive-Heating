@@ -111,7 +111,12 @@ class ExportTests(unittest.TestCase):
           dict(path='/dev/mmcblk0p2',tran='mmc',mountpoints=['/'],ro=False),
           dict(path='/dev/sdb1',tran='usb',mountpoints=['/media/pi/RO'],ro=True)]}
         with patch('panel.exports.subprocess.run') as run, patch('panel.exports.Path.is_symlink',return_value=False), patch('panel.exports.Path.is_mount',return_value=True), patch('panel.exports.os.access',return_value=True), patch('panel.exports.Path.stat') as stat, patch('panel.exports.shutil.disk_usage') as usage:
-            run.return_value.stdout=json.dumps(data)
+            def lsblk_result(args, **kwargs):
+                # Without --tree (and without NAME), real lsblk returns a flat list.
+                tree = data if '--tree' in args else {'blockdevices': [dict(path='/dev/sda1', tran=None, mountpoints=['/media/pi/USB'], ro=False)]}
+                from types import SimpleNamespace
+                return SimpleNamespace(stdout=json.dumps(tree))
+            run.side_effect=lsblk_result
             stat.return_value.st_dev=1;stat.return_value.st_ino=2;usage.return_value.free=10**9
             found=usb_drives()
             self.assertEqual([d['id'] for d in found],['/dev/sda1'])

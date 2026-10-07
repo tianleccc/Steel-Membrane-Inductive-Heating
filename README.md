@@ -180,6 +180,36 @@ Pulling this public repository does not require a GitHub password on the Pi. To 
 
 Back up `data/` and `config.json` separately. To duplicate the system, use the installation steps on the new Pi and review its wiring and configuration. Do not copy the old device's SSH host keys or login credentials.
 
+## Offline desktop console
+
+On a Pi with Raspberry Pi OS Desktop and Chromium, open **Steel Membrane Console**
+from the desktop or application menu. It opens a dedicated, maximized window using
+`http://127.0.0.1:8080/` (or the port in `config.json`). No Wi-Fi, Ethernet, Internet,
+or fixed IP address is needed. All interface assets are served locally.
+
+The desktop and wireless browser interfaces share the same instrument service,
+assays, photos, logs, and live state. Opening the console does not launch a second
+hardware controller. The service starts at boot and leaves outputs off; opening
+the console does not start heating or acquisition. Closing the console does not
+stop an active experiment. Use **Stop assay** or **Stop all** before closing if needed.
+
+Install or recreate the desktop and application-menu entries as the desktop user:
+
+```bash
+cd ~/steel-membrane
+bash scripts/install-desktop.sh
+```
+
+The main installation script also creates these entries when Chromium is present.
+On a desktop installation missing Chromium, install it with
+`sudo apt-get install chromium` first. A Raspberry Pi OS Lite installation needs
+a graphical desktop session before it can show the console. If the desktop asks
+whether to execute the launcher, choose **Execute** / **Trust and Launch**.
+The console waits briefly for the service during boot and reports an error if it
+cannot connect. Its browser profile is separate from the user's normal browser,
+under `~/.config/steel-membrane-console`. Wireless access remains available at
+`http://<Pi-IP>:8080/` whenever the Pi is connected to the local network.
+
 ## Service management and troubleshooting
 
 ```bash

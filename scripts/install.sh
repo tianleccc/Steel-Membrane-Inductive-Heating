@@ -18,4 +18,7 @@ PANEL_USER=$(id -un)
 sed -e "s|@ROOT@|$SCRIPT_ROOT|g" -e "s|@USER@|$PANEL_USER|g" deploy/steel-membrane.service.in | sudo tee /etc/systemd/system/steel-membrane.service >/dev/null
 sudo systemctl daemon-reload
 sudo systemctl enable --now steel-membrane.service
+if command -v chromium >/dev/null || command -v chromium-browser >/dev/null; then
+  bash scripts/install-desktop.sh
+fi
 echo 'Installed. Open http://<Pi-IP>:8080 . Review config.json before enabling heating.'

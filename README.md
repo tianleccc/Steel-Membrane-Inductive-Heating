@@ -1,23 +1,62 @@
-# Steel Membrane · 成像与红外加热控制台
+# Steel Membrane · Imaging and Infrared Heating Panel
 
-树莓派 5 本地 Web 面板：Camera Module 3 实时预览、荧光激发光、定时拍照、历史照片浏览，以及 MLX90614 红外温度 PID 控制。浏览器打开 `http://<树莓派 IP>:8080`。
+A local web panel for Raspberry Pi 5 that combines Camera Module 3 fluorescence imaging with MLX90614 infrared temperature control. It provides live preview, timed image acquisition, a photo archive, PID heating control, and CSV temperature logs.
 
-## 硬件与接线
+Open `http://<raspberry-pi-ip>:8080` in a browser on the same network.
 
-| 功能 | 配置 |
-|---|---|
-| 加热 MOSFET | BCM GPIO 24，物理引脚 18，高电平开启 |
-| 激发光 MOSFET | BCM GPIO 16，物理引脚 36，默认高电平开启 |
-| MLX90614 | I²C 1，默认地址 0x5A；SDA=GPIO 2，SCL=GPIO 3 |
-| 相机 | Camera Module 3；本机识别为 imx708_wide |
+## Hardware and wiring
 
-以传感器模块额定电压接电，确保 I²C 上拉电压与 Pi 3.3 V 逻辑兼容；所有控制共地。GPIO 只驱动 MOSFET/驱动接口，不直接供给加热负载。MOSFET 栅极应有硬件下拉，保证断电、进程崩溃和重启时不会自行开启。
+### Pin numbering
 
-原始温控程序是 `temp.py`（MLX90614），不是 `heating.py`（MAX31855）。代码默认 GPIO 24 与旧注释 GPIO 20 不一致，已按用户确认使用 GPIO 24。
+The software uses **BCM GPIO numbers**, not physical header positions. For example, `heater_gpio: 24` means **GPIO 24 on physical pin 18**, not physical pin 24. The connections below refer to the Raspberry Pi 5 **40-pin GPIO header**.
 
-## 新树莓派部署
+Turn off the Raspberry Pi and the external load supplies before changing wiring. Identify physical pin 1 using the board markings and the [official Raspberry Pi GPIO reference](https://www.raspberrypi.com/documentation/computers/raspberry-pi.html#gpio).
 
-使用 64 位 Raspberry Pi OS，连接网络、相机及传感器，启用 SSH。当前设备已验证运行 Debian 13 / Raspberry Pi OS Trixie。
+### Connection table
+
+| Device / connection | Raspberry Pi signal | Physical header pin | Notes |
+|---|---|---|---|
+| Heating MOSFET / driver control input | BCM GPIO 24 | **18** | Active HIGH; default PWM frequency: 100 Hz. Connect to the driver's logic input or an appropriate MOSFET gate interface. |
+| Fluorescence excitation LED MOSFET / driver control input | BCM GPIO 16 | **36** | Active HIGH by default. Set `led_active_low` to `true` only if required by the driver. |
+| MLX90614 SDA | BCM GPIO 2 / SDA1 | **3** | I2C data; default sensor address: `0x5A`. |
+| MLX90614 SCL | BCM GPIO 3 / SCL1 | **5** | I2C clock; bus 1 (`/dev/i2c-1`). |
+| MLX90614 GND | GND | **6**, or another GND pin | Connect the sensor ground to the Pi ground. |
+| MLX90614 VCC / VIN | 3.3 V, **only if supported by the specific sensor module** | **1** or **17**, for a 3.3 V-compatible module | Verify the module's supply specification first. Different MLX90614 variants and breakout boards have different supply requirements. |
+| Heating driver signal ground | GND | **14**, for example | Common signal reference for a non-isolated driver; follow the driver manufacturer's wiring requirements. |
+| LED driver signal ground | GND | **34**, for example | Common signal reference for a non-isolated driver. |
+| Camera Module 3 ribbon cable | Compatible CAM/DISP camera connector | Not on the 40-pin header | Use a Raspberry Pi 5-compatible camera cable. The detected camera in the initial setup was `imx708_wide`. |
+
+The ground pin choices are suggested wiring positions, not software settings or a record of verified physical connections. Available header ground pins are **6, 9, 14, 20, 25, 30, 34, and 39**.
+
+### Electrical connections
+
+- Pi GPIO signals use **3.3 V logic**. The sensor's SDA/SCL pull-ups must be compatible with 3.3 V, even if its breakout board accepts a different supply voltage. Do not pull the Pi I2C lines up to 5 V.
+- The heating circuit and excitation LED require appropriate external power supplies and drivers. GPIO pins provide control signals; they must not power either load directly.
+- For non-isolated drivers, connect the Pi, sensor, and driver signal grounds to a common reference. Route high-current load return paths through the load wiring, not through the Pi GPIO header.
+- Use a suitable hardware pull-down on each active-HIGH MOSFET gate or control input so the load stays off while the Pi boots or the GPIO is unconfigured. Confirm compatibility with the actual driver circuit.
+- Load-side terminal assignments depend on the MOSFET/driver module. Follow its documentation for power input and load output wiring; those assignments cannot be inferred from this repository.
+
+The temperature sensor for this project is **MLX90614 over I2C**. The earlier MAX31855/SPI script is not used. Heating uses **GPIO 24**, as confirmed for this setup; the GPIO 20 comment in the original `temp.py` was inconsistent with its default argument.
+
+### Configuration corresponding to the wiring
+
+Device-specific settings are stored in the untracked `config.json` file:
+
+```json
+{
+  "heater_enabled": false,
+  "heater_gpio": 24,
+  "led_gpio": 16,
+  "led_active_low": false,
+  "sensor_address": 90
+}
+```
+
+`90` is the decimal representation of I2C address `0x5A`. GPIO values are BCM numbers. Keep `heater_enabled` set to `false` until the sensor and heating driver have been connected and checked.
+
+## Install on a new Raspberry Pi
+
+Use 64-bit Raspberry Pi OS with network access and SSH enabled. The initial installation was verified on Raspberry Pi OS Trixie / Debian 13.
 
 ```bash
 git clone https://github.com/tianleccc/Steel-Membrane-Inductive-Heating.git ~/steel-membrane
@@ -25,74 +64,105 @@ cd ~/steel-membrane
 bash scripts/install.sh
 ```
 
-安装脚本启用 I²C、安装系统相机/GPIO 依赖，创建带系统包访问的虚拟环境，并注册 systemd 服务。请使用普通用户运行脚本；sudo 提示时输入该设备密码。
+Run the installer as a normal user, not as root. Enter that device's password when prompted by `sudo`.
 
-检查 `config.json` 的引脚及高低电平配置。首次复制时 `heater_enabled` 默认是 `false`；接线正确后改为 `true`。传感器未连接/无有效读数时，软件仍拒绝加热。连接传感器或修改配置后：
+The installer enables I2C, installs the system camera/GPIO dependencies, creates a Python virtual environment with access to system packages, and registers a systemd service. The panel starts automatically at boot.
+
+Review `config.json` for the correct GPIO pins and driver polarity. New installations have heating disabled by default. After checking the wiring and obtaining valid sensor readings, set `heater_enabled` to `true` when ready to enable heating controls. Heating cannot start without valid, recent temperature readings.
+
+After connecting the sensor or changing configuration, restart the service:
 
 ```bash
 sudo systemctl restart steel-membrane
 ```
 
-每次启动均保持加热、激发光和拍照任务关闭，不恢复先前实验。Web 服务开机自动启动。
+Each startup leaves heating, excitation illumination, and acquisition jobs off. Previous experiments are not resumed automatically.
 
-## 面板使用
+## Using the panel
 
-- **实时观察**：约每秒更新 3–4 次预览；只看画面时默认不点亮激发光。
-- **荧光激发光**：手动打开持续照明以观察荧光。页面隐藏时主动关闭；失去续期后 15 秒内关闭。长时间照射可能引起漂白。
-- **拍一张 / 定时采集**：自动点亮 GPIO 16，默认预热 1 秒，保存 4608×2592 JPEG，拍摄后关闭光源（如未开启持续照明）。保留原脚本手动焦点 11.5、自动曝光及自动白平衡设置。
-- **定时采集**：第一张立即开始，之后按拍摄开始时间计算间隔；处理耗时超过间隔则跳过错过的时间点，不追赶连拍。拍照间隔 2–86400 秒，数量 1–100000 张。
-- **红外温控**：设定目标温度、从点击开始计时的持续时长、占空比上限。原脚本的 PID 默认值为 12 / 0.05 / 0.1；每 5 个 0.1 秒周期停止输出采样，三次读数取中位数并做 EMA。输出上限表示占空比，并非实测功率。
-- **照片档案**：日期筛选按 UTC，显示时间按浏览器本地时间；分页浏览、大图左右翻阅、下载原图。时间戳文件名使用 UTC。
-- **温度日志**：每次加热单独创建 CSV，每次采样立即写入并 flush，不等退出才保存。
-- **全部停止**：停止加热、当前/后续拍照和激发光。已经完成的照片保留。
+The current panel interface is in Chinese; the descriptions below explain its controls in English.
 
-加热和定时采集相互独立。关闭浏览器不会停止已启动的限时加热或定时拍照；如需停止请先按“全部停止”。加热最长默认 2 小时；达到时间会关闭输出。
+| Feature | Behavior |
+|---|---|
+| Live preview | Displays a reduced-resolution preview, typically around 3–4 updates per second. Viewing the preview does not automatically switch on the excitation LED. |
+| Excitation illumination | Manually enables continuous illumination for fluorescence observation. The page requests that it turn off when hidden; the illumination lease expires after 15 seconds without renewal during normal operation. Continuous illumination can cause photobleaching. |
+| Capture one image | Turns on GPIO 16, waits for the default 1-second illumination warmup, saves a 4608 × 2592 JPEG, then turns off the LED unless continuous illumination is enabled. |
+| Timed acquisition | Starts the first capture immediately, then schedules subsequent captures by their start times. Missed intervals are skipped rather than queued for catch-up. Supported interval: 2–86,400 seconds; count: 1–100,000 images. |
+| Infrared heating | Accepts a target temperature, duration measured from the time Start is pressed, and an output duty-cycle cap. The cap is not a measured power limit. |
+| Photo archive | Provides date filtering, pagination, full-image viewing, previous/next navigation, and original-image downloads. Date filtering and filenames use UTC; displayed times use the browser's local timezone. |
+| Temperature logs | Creates a separate CSV for each heating run. Each sample is written and flushed immediately rather than waiting for program exit. |
+| Stop all | Stops heating, pending acquisition, and excitation illumination. Completed images are retained. |
 
-## 温度处理与保护
+Image capture preserves the original camera defaults: manual lens position **11.5**, automatic exposure, and automatic white balance.
 
-传感器故障、无效值、超时读数和原始采样达到 110 °C 会锁定停止加热。恢复正常温度后需手动清除故障，再重新开始。检测过温先检查每个原始读数，不被中位数/EMA 延迟。占空比上限最后应用，最低占空比不会覆盖上限。
+Heating and timed acquisition operate independently. **Closing the browser does not stop an active heating run or acquisition job.** Use Stop all before leaving if you want both stopped. The default maximum heating duration is 2 hours; output turns off when the selected duration expires.
 
-旧 `temp.py` 的软件发射率公式在 ε≠1 时存在问题；本版**不使用这个修正**，直接记录 MLX90614 自身输出，也不改写传感器 EEPROM。默认行为与旧代码 ε=1 一致。金属表面红外读数依赖发射率、反射环境及视场，实际恒温效果需在传感器安装后进行测温对照和 PID 调整。原脚本基于电阻估算的电流/功率限制未暴露在面板中，因为系统没有实际电流/功率反馈。
+## Temperature control and protection
 
-软件保护依赖传感器、操作系统及程序正常运行，不等价于硬件急停/独立过温断电。生产运行应保留独立硬件保护。
+The controller retains the original PID defaults: `Kp=12`, `Ki=0.05`, and `Kd=0.1`. Every five 0.1-second cycles, it switches heating output off for infrared sampling. Three readings are combined using a median and an exponential moving average (EMA).
 
-## 数据与 Git 维护
+Sensor failures, invalid values, stale readings, or a raw sample reaching the default **110 °C** cutoff latch heating off. Once valid readings return and the temperature is below the cutoff, clear the fault manually before starting another run. Cutoff detection checks individual raw readings before median/EMA filtering. The duty-cycle cap is applied after the minimum-duty rule, so minimum duty cannot override the cap.
 
-`data/photos/` 保存原图、缩略图和逐张 JSON 元数据；`data/logs/` 保存 CSV。`config.json` 是当前设备的本地设置。它们都被 Git 忽略，不随代码推送。树莓派 SSH 密码、访问令牌和密钥不进入仓库。
+The legacy `temp.py` software emissivity correction was incorrect for emissivity values other than 1. This implementation uses the MLX90614's reported temperature directly and does not modify its EEPROM. This matches the legacy behavior with software emissivity set to 1. Infrared measurements of metal depend on surface emissivity, reflected radiation, and the sensor's field of view; validate the measurements and tune the PID after installing the sensor.
 
-推荐在电脑上编辑并提交到 GitHub，在树莓派拉取已审阅版本：
+The panel does not expose the legacy resistance-based power/current estimates as limits because this system has no measured current or power feedback.
+
+Software protection depends on the sensor, operating system, and application. Keep independent hardware emergency-stop and overtemperature protection for the heating equipment.
+
+## Data and Git workflow
+
+| Path | Contents | Tracked in Git? |
+|---|---|---|
+| `panel/` | Web application, camera control, and temperature control | Yes |
+| `config.example.json` | Default configuration for new installations | Yes |
+| `config.json` | Settings specific to the current device | No |
+| `data/photos/` | Original images, thumbnails, and per-image JSON metadata | No |
+| `data/logs/` | Temperature CSV files | No |
+| `.venv/` | Python environment | No |
+
+Image metadata includes the capture time, camera settings, and temperature state at capture. SSH passwords, access tokens, and private keys must not be committed.
+
+Edit and commit on your development computer, then pull the reviewed version on the Pi:
 
 ```bash
-# 电脑 / 开发环境
-git add <修改的代码文件>
+# Development computer
+# Replace the example path with the files you changed.
+git add README.md
 git commit -m "Describe the change"
 git push origin main
 
-# 树莓派：会停止当前实验，更新并重新启动到关闭输出的待机状态
+# Raspberry Pi: this stops the current experiment and restarts in standby.
 cd ~/steel-membrane
 bash scripts/update.sh
 ```
 
-更新脚本拒绝覆盖未提交修改或本地未推送提交，使用 fast-forward 更新。公开仓库拉取不需要在 Pi 保存 GitHub 密码；如要从 Pi 直接推送，应为该设备单独配置 GitHub SSH key / deploy key，不要复制其他设备私钥。
+The update script refuses to overwrite uncommitted changes or local commits that have not been pushed. It uses a fast-forward update, installs dependencies, runs the control tests, and restarts the service if these steps succeed.
 
-备份实验数据时单独备份 `data/` 与 `config.json`。复制新系统使用上述安装脚本；不要克隆旧设备 SSH 主机密钥、网络配置或登录凭据。
+Pulling this public repository does not require a GitHub password on the Pi. To push directly from a Pi, configure a separate SSH key or suitable deploy key for that device; do not copy another device's private key.
 
-## 服务维护与诊断
+Back up `data/` and `config.json` separately. To duplicate the system, use the installation steps on the new Pi and review its wiring and configuration. Do not copy the old device's SSH host keys or login credentials.
+
+## Service management and troubleshooting
 
 ```bash
 sudo systemctl status steel-membrane
 journalctl -u steel-membrane -n 100 --no-pager
 sudo systemctl stop steel-membrane
 sudo systemctl start steel-membrane
+
 cd ~/steel-membrane
 .venv/bin/python -m unittest discover -s tests -v
 ```
 
-MLX90614 未连接会显示初始化失败，拍照功能仍可独立使用。断电后正确连接传感器，再启动/重启服务。不要同时运行旧 `camera.py` / `temp.py`，否则会争用相机或 GPIO。面板使用单进程持有设备锁，不能以多个 WSGI worker 启动。
+If the MLX90614 is disconnected, the panel reports a temperature-control initialization failure while imaging remains available. Power down before connecting the sensor, then start or restart the service. Check the SDA/SCL wiring, supply requirements, and configured I2C address if the sensor is still unavailable.
 
-服务面向可信局域网，无互联网远程登录功能；同一局域网中能访问面板的人可以控制实验。跨站控制请求需同源页面令牌。不要直接把 8080 端口映射到公网；远程维护可使用 SSH 隧道。
+Do not run the legacy `camera.py` or `temp.py` alongside the panel: they would compete for the camera or GPIO pins. The panel uses a single process to own the devices and holds a device lock. Do not run multiple WSGI workers.
 
-## 上游文档
+The panel is intended for a trusted local network and does not provide user login. Anyone who can access it on that network can control the experiment. Control requests require a same-origin page token. Do not expose port 8080 directly to the internet; use an SSH tunnel for remote access.
 
-- [Raspberry Pi Picamera2 官方手册](https://datasheets.raspberrypi.com/camera/picamera2-manual.pdf)
-- [Melexis MLX90614 数据手册](https://www.melexis.com/-/media/files/documents/datasheets/mlx90614-datasheet-melexis.pdf)
+## References
+
+- [Raspberry Pi GPIO and 40-pin header documentation](https://www.raspberrypi.com/documentation/computers/raspberry-pi.html#gpio)
+- [Raspberry Pi camera connection documentation](https://www.raspberrypi.com/documentation/accessories/camera.html)
+- [Official Picamera2 manual](https://datasheets.raspberrypi.com/camera/picamera2-manual.pdf)
+- [Melexis MLX90614 datasheet](https://www.melexis.com/-/media/files/documents/datasheets/mlx90614-datasheet-melexis.pdf)

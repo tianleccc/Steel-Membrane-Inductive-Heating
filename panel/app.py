@@ -283,6 +283,10 @@ def create_app(config=None, heater=None, camera=None):
         data = body()
         return jsonify(exports.start(data.get('assay_id'), data.get('mode'), data.get('drive_id')))
 
+    @app.post('/api/usb/eject')
+    def usb_eject():
+        return jsonify(exports.eject(body().get('drive_id')))
+
     @app.get('/api/exports/current')
     def export_current():
         with exports.lock:

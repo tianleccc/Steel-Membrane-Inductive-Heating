@@ -195,8 +195,10 @@ Open **Photo archive**, then open an assay folder:
 
 Finish or stop the assay before exporting. Export progress appears in the archive;
 closing the page does not stop copying. Reopen the archive to check the latest job.
-Wait for **Export complete**, then safely eject the drive in the Pi desktop file
-manager before unplugging it. The USB option lists writable, mounted USB storage
+The export flushes the USB filesystem and verifies each file by SHA-256 before
+showing **Export complete**. Then click **Safely eject USB** and wait for the
+unmounted confirmation before unplugging it. If the drive has multiple mounted
+volumes, eject all of them first. You can also use the Pi desktop file manager. The USB option lists writable, mounted USB storage
 under `/media`, `/run/media`, or `/mnt`; if nothing appears, open the drive in the
 Pi file manager to mount it and click **Refresh USB drives**. The panel does not
 format disks or change their permissions. A drive attached to a remote laptop is

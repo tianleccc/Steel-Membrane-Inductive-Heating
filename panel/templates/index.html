@@ -4,7 +4,7 @@
   <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
   <meta name="panel-token" content="{{ token }}">
   <title>Steel Membrane · Instrument Panel</title>
-  <link rel="stylesheet" href="/static/style.css?v=export-1">
+  <link rel="stylesheet" href="/static/style.css?v=export-2">
 </head>
 <body>
   <header><a class="brand" href="/"><span class="mark">S<span>M</span></span><span>STEEL MEMBRANE<small>Imaging & induction heating</small></span></a><div class="header-right"><span id="connection" class="pill">Connecting</span><button id="stop-all" class="danger">■ Stop all</button></div></header>
@@ -71,6 +71,7 @@
           <label>USB drive on this Raspberry Pi<select id="usb-drive"><option value="">Select a USB drive</option></select></label>
           <button id="refresh-usb" class="secondary">Refresh USB drives</button>
           <button id="export-usb" class="secondary">Export assay to USB</button>
+          <button id="eject-usb" class="secondary">Safely eject USB</button>
         </div>
         <p class="hint">ZIP includes all original photos and metadata, regardless of the date filter. USB export includes photos, temperature logs and assay details. Finish or stop the assay before exporting.</p>
         <p id="usb-note" class="hint"></p>
@@ -83,5 +84,5 @@
   </main>
   <footer><span>STEEL MEMBRANE / LAB INSTRUMENTS</span><span>Local acquisition · Traceable records</span></footer>
   <dialog id="photo-dialog"><div class="dialog-head"><span id="photo-title"></span><button id="close-photo" class="secondary">Close ×</button></div><img id="full-photo" alt="Archived photo"><div class="dialog-foot"><button id="previous-photo" class="secondary">← Previous photo</button><button id="delete-photo" class="danger">Delete photo</button><a id="download-photo" class="primary" download>Download original ↓</a><button id="next-photo" class="secondary">Next photo →</button></div></dialog>
-  <script src="/static/app.js?v=export-1" defer></script>
+  <script src="/static/app.js?v=export-2" defer></script>
 </body></html>

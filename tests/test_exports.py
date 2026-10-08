@@ -125,3 +125,28 @@ class ExportTests(unittest.TestCase):
         aid=self.record()
         (self.manager.archive.folder(aid)/'photos'/'leak.json').symlink_to('/etc/passwd')
         self.assertEqual(self.post('exports',dict(assay_id=aid,mode='photos')).status_code,400)
+
+    def test_flush_failure_is_not_reported_as_complete(self):
+        aid=self.record()
+        with tempfile.TemporaryDirectory() as tmp:
+            drive=self.drive(Path(tmp));self.app.extensions['exports'].drives=lambda:[drive]
+            with patch('panel.exports.sync_filesystem',side_effect=OSError('USB flush failed')):
+                result=self.wait(self.post('exports',dict(assay_id=aid,mode='usb',drive_id=drive['id'])).json)
+                self.assertEqual(result['status'],'failed')
+                self.assertIn('USB flush failed',result['error'])
+
+    def test_eject_requires_idle_known_usb_and_handles_failure(self):
+        exports=self.app.extensions['exports']
+        with tempfile.TemporaryDirectory() as tmp:
+            drive=self.drive(Path(tmp));exports.drives=lambda:[drive]
+            exports.job=dict(id='test',assay_id='unassigned',status='running')
+            self.assertEqual(self.post('usb/eject',dict(drive_id=drive['id'])).status_code,400)
+            exports.job=None
+            self.assertEqual(self.post('usb/eject',dict(drive_id='/dev/mmcblk0')).status_code,400)
+            with patch('panel.exports.subprocess.run') as run:
+                run.return_value.returncode=1;run.return_value.stderr='Device busy'
+                self.assertEqual(self.post('usb/eject',dict(drive_id=drive['id'])).status_code,400)
+                run.return_value.returncode=0
+                exports.drives=iter(([drive],[])).__next__
+                self.assertEqual(self.post('usb/eject',dict(drive_id=drive['id'])).status_code,200)
+                self.assertIn('--no-user-interaction',run.call_args.args[0])

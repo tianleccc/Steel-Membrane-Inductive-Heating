@@ -1,5 +1,7 @@
 """Background archive exports without blocking instrument supervision."""
 import json
+import ctypes
+import hashlib
 import os
 from pathlib import Path
 import re
@@ -8,6 +10,19 @@ import subprocess
 import threading
 import uuid
 import zipfile
+
+
+def sync_filesystem(fd):
+    """Flush file data AND filesystem-wide allocation metadata (including FAT)."""
+    libc = ctypes.CDLL(None, use_errno=True)
+    if libc.syncfs(fd) != 0:
+        code = ctypes.get_errno()
+        raise OSError(code, os.strerror(code))
+
+
+def checksum(path):
+    with path.open('rb') as stream:
+        return hashlib.file_digest(stream, 'sha256').hexdigest()
 
 
 def usb_drives():
@@ -142,7 +157,20 @@ class Exports:
                 final = job['name'] + '_' + job['id'][:8]
                 os.rename(partial, final, src_dir_fd=fd, dst_dir_fd=fd)
                 os.fsync(fd)
+                with self.lock:
+                    job['phase'] = 'Flushing USB filesystem and verifying files'
+                sync_filesystem(fd)
+                published = Path(f'/proc/self/fd/{fd}')/final
+                for source, relative in files:
+                    if checksum(source) != checksum(published/relative):
+                        raise OSError(f'USB verification failed: {relative}')
+                # Check the visible mount still points to the filesystem we wrote.
+                current = Path(drive['mount']).stat()
+                if (current.st_dev, current.st_ino) != tuple(drive['identity']):
+                    raise OSError('USB was removed or remounted during export')
                 job['destination'] = drive['mount'] + '/' + final
+                job['drive_id'] = drive['id']
+                job['verified_files'] = len(files)
             else:
                 target = self.cache/(job['id']+'.zip')
                 with zipfile.ZipFile(target, 'w', compression=zipfile.ZIP_STORED, allowZip64=True) as bundle:
@@ -169,3 +197,24 @@ class Exports:
             if self.job['status'] != 'complete' or not self.job.get('_zip'):
                 raise ValueError('ZIP is not ready')
             return self.job['_zip'].open('rb'), self.job['name']+'.zip'
+
+    def eject(self, drive_id):
+        with self.lock:
+            if self.job and self.job['status'] == 'running':
+                raise ValueError('Wait for the export to finish before ejecting USB')
+            drive = next((d for d in self.drives() if d['id'] == drive_id), None)
+            if not drive:
+                raise ValueError('USB volume is not mounted. Refresh the USB list.')
+            try:
+                result = subprocess.run(['udisksctl', 'unmount', '--block-device', drive_id,
+                    '--no-user-interaction'], capture_output=True, text=True, timeout=20)
+            except (OSError, subprocess.SubprocessError) as error:
+                raise ValueError(f'Could not eject USB: {error}. Use the Pi file manager to eject it.') from error
+            if result.returncode != 0:
+                raise ValueError('USB could not be ejected. Close files open on it and try again. '
+                                 + result.stderr.strip())
+            if any(d['id'] == drive_id for d in self.drives()):
+                raise ValueError('USB is still mounted. Use the Pi file manager to eject it.')
+            if self.job and self.job.get('drive_id') == drive_id:
+                self.job['ejected'] = True
+            return dict(ok=True, label=drive['label'])

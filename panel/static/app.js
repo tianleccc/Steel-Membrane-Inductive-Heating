@@ -16,12 +16,12 @@ function notify(text) {
   clearTimeout(toastTimer);
   toastTimer = setTimeout(() => $('message').hidden = true, 6500);
 }
-async function api(path, data) {
+async function api(path, data, timeout = 8000) {
   const options = data === undefined ? {} : {
     method: 'POST', headers: {'Content-Type': 'application/json', 'X-Panel-Token': token},
     body: JSON.stringify(data)
   };
-  const response = await fetch('/api/' + path, {...options, signal: AbortSignal.timeout(8000)});
+  const response = await fetch('/api/' + path, {...options, signal: AbortSignal.timeout(timeout)});
   const result = await response.json().catch(() => ({error: 'Request failed. Refresh the page and try again.'}));
   if (!response.ok) throw Error(result.error || 'Request failed');
   return result;
@@ -315,17 +315,17 @@ async function refreshUSB() {
     const data = await api('usb');
     options('usb-drive', data.items.map(d => [d.id, `${d.label} · ${(d.free_bytes / 1e9).toFixed(1)} GB free`]), 'Select a USB drive');
     if (data.items.length === 1) $('usb-drive').value = data.items[0].id;
-    $('usb-note').textContent = data.items.length ? 'Wait for Export complete, then safely eject the drive using the Pi desktop before unplugging.' : 'No writable USB drive found. Insert one into the Raspberry Pi and open it in the Pi file manager to mount it, then click Refresh USB drives.';
+    $('usb-note').textContent = data.items.length ? 'After export finishes, click Safely eject USB before unplugging.' : 'No writable USB drive found. Insert one into the Raspberry Pi and open it in the Pi file manager to mount it, then click Refresh USB drives.';
   } catch (error) { $('usb-note').textContent = error.message; }
 }
 function displayExport(job) {
   currentExport = job;
   const running = job?.status === 'running';
-  $('download-folder').disabled = $('export-usb').disabled = !!running;
+  $('download-folder').disabled = $('export-usb').disabled = $('eject-usb').disabled = !!running;
   $('export-status').hidden = !job;
   $('export-download').hidden = !job || job.mode !== 'photos' || job.status !== 'complete';
   if (!job) return;
-  $('export-status').textContent = job.status === 'running' ? `Exporting ${job.name}: ${job.completed} / ${job.total} files.${job.mode === 'usb' ? ' Keep the USB connected.' : ''}` : job.status === 'failed' ? `Export failed: ${job.error}` : job.mode === 'usb' ? `Export complete: ${job.destination}. You can now safely eject the USB drive from the Pi desktop.` : `ZIP ready: ${job.name}. Click Download ready ZIP below to save it to this computer.`;
+  $('export-status').textContent = job.status === 'running' ? `Exporting ${job.name}: ${job.completed} / ${job.total} files. ${job.phase || ''}${job.mode === 'usb' ? ' Keep the USB connected.' : ''}` : job.status === 'failed' ? `Export failed: ${job.error}` : job.mode === 'usb' ? `Export complete: ${job.destination}. ${job.verified_files || job.total} files verified. ${job.ejected ? 'USB volume safely ejected.' : 'Click Safely eject USB before unplugging.'}` : `ZIP ready: ${job.name}. Click Download ready ZIP below to save it to this computer.`;
   if (job.mode === 'photos' && job.status === 'complete') $('export-download').href = `/exports/${job.id}/download`;
   clearTimeout(exportTimer);
   if (running) exportTimer = setTimeout(pollExport, 1000);
@@ -350,3 +350,17 @@ $('download-folder').onclick = () => beginExport('photos');
 $('export-usb').onclick = () => beginExport('usb');
 $('refresh-usb').onclick = refreshUSB;
 pollExport();
+
+$('eject-usb').onclick = async () => {
+  const drive = $('usb-drive').value;
+  if (!drive) { notify('Select the USB volume to eject first.'); return; }
+  $('eject-usb').disabled = true;
+  $('usb-note').textContent = 'Ejecting USB. Keep it connected until confirmation appears.';
+  try {
+    const result = await api('usb/eject', {drive_id: drive}, 30000);
+    await refreshUSB(); await pollExport();
+    $('usb-note').textContent = `${result.label} safely unmounted. You may unplug a single-volume USB drive now. If it has other mounted volumes, eject those first.`;
+    notify('USB volume safely ejected');
+  } catch (error) { $('usb-note').textContent = error.message; }
+  finally { $('eject-usb').disabled = false; }
+};

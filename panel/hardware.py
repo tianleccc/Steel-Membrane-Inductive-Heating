@@ -3,14 +3,14 @@ class IRHardware:
     def __init__(self, config):
         from gpiozero import PWMOutputDevice
         from adafruit_extended_bus import ExtendedI2C
-        import adafruit_mlx90614
+        from .mlx90614 import CheckedMLX90614
         self.heater = None
         self.i2c = None
         try:
             self.heater = PWMOutputDevice(config['heater_gpio'], frequency=config['pwm_hz'],
                                           initial_value=0, active_high=True)
             self.i2c = ExtendedI2C(config.get('sensor_bus', 20))
-            self.sensor = adafruit_mlx90614.MLX90614(self.i2c, address=config['sensor_address'])
+            self.sensor = CheckedMLX90614(self.i2c, address=config['sensor_address'])
         except BaseException:
             self.close()
             raise

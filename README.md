@@ -36,7 +36,7 @@ The ground pin choices are suggested wiring positions, not software settings or 
 - Use a suitable hardware pull-down on each active-HIGH MOSFET gate or control input so the load stays off while the Pi boots or the GPIO is unconfigured. Confirm compatibility with the actual driver circuit.
 - Load-side terminal assignments depend on the MOSFET/driver module. Follow its documentation for power input and load output wiring; those assignments cannot be inferred from this repository.
 
-The temperature sensor for this project is **MLX90614 over I2C**. The earlier MAX31855/SPI script is not used. Heating uses **GPIO 24**, as confirmed for this setup; the GPIO 20 comment in the original `temp.py` was inconsistent with its default argument.
+The temperature sensor for this project is **MLX90614 over I2C**. Each read validates the SMBus PEC (CRC-8) and sensor error bit before accepting the temperature. Corrupt reads enter the output-off retry path. A valid overtemperature sample still stops heating; its raw peak and sample batch are recorded in the fault message and CSV before closing the log. The earlier MAX31855/SPI script is not used. Heating uses **GPIO 24**, as confirmed for this setup; the GPIO 20 comment in the original `temp.py` was inconsistent with its default argument.
 
 ### Sensor bus on GPIO5 / GPIO6
 

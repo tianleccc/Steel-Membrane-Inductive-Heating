@@ -143,6 +143,17 @@ class Heater:
                 raise ValueError('Temperature still exceeds the safety cutoff')
             self.state['fault'] = None
 
+    def overtemperature(self, readings):
+        peak = max(o for o,a in readings if math.isfinite(o))
+        detail = f'Infrared safety cutoff: raw peak {peak:.2f} C; limit {self.c["cutoff_c"]:g} C; samples {readings!r}'
+        logging.error(detail)
+        if self.writer:
+            self.writer.writerow([datetime.now(timezone.utc).isoformat(),peak,'','',
+                self.state['target'],0,self.context.get('id',''),'','',
+                self.pid.kp,self.pid.ki,self.pid.kd,'overtemperature',detail])
+            self.log.flush()
+        self._stop(detail)
+
     def sensor_error(self, message):
         with self.lock:
             self._off()
@@ -165,7 +176,7 @@ class Heater:
         with self.lock:
             # Overtemperature must never be hidden by another invalid sample.
             if any(math.isfinite(o) and o >= self.c['cutoff_c'] for o,a in readings):
-                self._stop('Infrared temperature reached the safety cutoff')
+                self.overtemperature(readings)
             if not readings or any(not math.isfinite(o) or not math.isfinite(a)
                                    or not -40 < o < 300 or not -40 < a < 125 for o,a in readings):
                 self.sensor_error('Invalid infrared temperature reading; output off while retrying')
@@ -189,7 +200,7 @@ class Heater:
             self.last_sample = self.clock()
             self.state.update(ready=True, temperature=obj, ambient=amb, filtered=ema)
             if max(o for o,a in readings) >= self.c['cutoff_c']:
-                self._stop('Infrared temperature reached the safety cutoff')
+                self.overtemperature(readings)
             if self.state['active']:
                 if self.clock() >= self.deadline:
                     self._stop()

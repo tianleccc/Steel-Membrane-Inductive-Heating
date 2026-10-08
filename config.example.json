@@ -7,6 +7,7 @@
   "led_active_low": false,
   "sensor_address": 90,
   "sensor_bus": 20,
+  "sensor_recovery_s": 5.0,
   "cutoff_c": 110,
   "max_duration_s": 7200,
   "pwm_hz": 100,

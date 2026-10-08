@@ -99,7 +99,7 @@ class AssayTests(unittest.TestCase):
         self.heater.sample([])
         self.manager.tick()
         self.assertIsNotNone(self.manager.active)
-        self.now+=2.1
+        self.now+=self.heater.recovery_timeout+.1
         self.heater.output()
         self.manager.tick()
         self.assertFalse(self.camera.snapshot()['running'])

@@ -21,8 +21,12 @@ class PID:
         derivative = 0.0
         if self.last:
             dt = max(now - self.last[0], 0.001)
-            self.integral = max(-1000, min(1000, self.integral + error * dt))
             derivative = (error - self.last[1]) / dt
+            candidate = max(-1000, min(1000, self.integral + error * dt))
+            predicted = self.kp * error + self.ki * candidate + self.kd * derivative
+            # Do not store more integral while it pushes output further into saturation.
+            if 0 <= predicted <= 100 or predicted > 100 and error < 0 or predicted < 0 and error > 0:
+                self.integral = candidate
         self.last = now, error
         return max(0, min(100, self.kp * error + self.ki * self.integral + self.kd * derivative))
 
@@ -39,6 +43,7 @@ class Heater:
         self.writer = None
         self.pid = None
         self.deadline = 0
+        self.recovery_timeout = config.get('sensor_recovery_s', 5.0)
         self.last_sample = 0
         self.good_batches = 0
         self.state = dict(ready=False, enabled=config['heater_enabled'], active=False,
@@ -152,8 +157,8 @@ class Heater:
                     self.state['target'], 0, self.context.get('id',''), '', '',
                     self.pid.kp, self.pid.ki, self.pid.kd, 'retrying', str(message)])
                 self.log.flush()
-            if self.clock()-self.last_sample >= 2:
-                self._stop('Temperature feedback did not recover within 2 seconds. Heating is latched off.')
+            if self.clock()-self.last_sample >= self.recovery_timeout:
+                self._stop(f'Temperature feedback did not recover within {self.recovery_timeout:g} seconds. Heating is latched off.')
 
     def sample(self, readings):
         """Every sample must be valid; cutoff checks raw peaks before smoothing."""
@@ -167,8 +172,8 @@ class Heater:
                 return
             recovered = self.state['recovering']
             if recovered:
-                if self.clock()-self.last_sample >= 2 and self.state['active']:
-                    self._stop('Temperature feedback did not recover within 2 seconds. Heating is latched off.')
+                if self.clock()-self.last_sample >= self.recovery_timeout and self.state['active']:
+                    self._stop(f'Temperature feedback did not recover within {self.recovery_timeout:g} seconds. Heating is latched off.')
                 self.good_batches += 1
                 if self.good_batches < 2:
                     self._off()
@@ -191,7 +196,9 @@ class Heater:
                 else:
                     requested = self.pid.update(ema, self.clock())
                     if ema < self.pid.target:
-                        requested = max(requested, self.c['min_duty'])
+                        # Retain the boost far below target; taper its floor over the final 3 C.
+                        floor = self.c['min_duty'] * min(1, (self.pid.target-ema)/3)
+                        requested = max(requested, floor)
                     self.state['duty'] = min(requested, 100,
                                              self.state['duty']+self.c['slew'])
             self.history.append(dict(t=time.time(), temperature=obj, target=self.state['target'],
@@ -216,9 +223,11 @@ class Heater:
             if self.clock() >= self.deadline:
                 self._stop()
                 return 0
-            if self.clock()-self.last_sample >= 2:
+            if self.clock()-self.last_sample >= self.recovery_timeout:
                 self._stop('Temperature reading timed out')
                 return 0
+            if self.clock()-self.last_sample >= 2 and not self.state['recovering']:
+                self.sensor_error('Temperature sample stale; output off while retrying')
             if self.state['recovering'] or not self.state['ready']:
                 self._off()
                 return 0

@@ -25,6 +25,9 @@ def load_config():
     if path.exists():
         config.update(json.loads(path.read_text(encoding='utf-8')))
     config['data_dir'] = str((ROOT/config['data_dir']).resolve())
+    recovery = config.get('sensor_recovery_s', 5.0)
+    if isinstance(recovery, bool) or not isinstance(recovery, (int, float)) or not 2 <= recovery <= 10:
+        raise ValueError('sensor_recovery_s must be between 2 and 10 seconds')
     if config['heater_gpio'] == config['led_gpio']:
         raise ValueError('Heater and LED must use different GPIO pins')
     if not (0 < config['cycle_s'] <= 1 and 0 < config['off_window_s'] < config['cycle_s']

@@ -51,7 +51,7 @@ class ControlTests(unittest.TestCase):
     def test_sensor_failure_latches_and_never_restarts_automatically(self):
         self.h.start(70,300)
         self.h.sample([])
-        self.time+=2.1
+        self.time+=self.h.recovery_timeout+.1
         self.h.output()
         self.h.sample([(25,23)]*3)
         self.h.sample([(25,23)]*3)
@@ -78,7 +78,7 @@ class ControlTests(unittest.TestCase):
 
     def test_stale_sample_turns_off(self):
         self.h.start(70,300)
-        self.time+=2.1
+        self.time+=self.h.recovery_timeout+.1
         self.assertEqual(self.h.output(),0)
         self.assertTrue(self.h.snapshot()['fault'])
 
@@ -161,7 +161,7 @@ class ControlTests(unittest.TestCase):
     def test_late_valid_read_cannot_resume_faulted_heating(self):
         self.h.start(70,300)
         self.h.sensor_error('error')
-        self.time+=2.1
+        self.time+=self.h.recovery_timeout+.1
         self.h.sample([(25,23)]*3)
         self.h.sample([(25,23)]*3)
         self.assertFalse(self.h.snapshot()['active'])
@@ -176,9 +176,41 @@ class ControlTests(unittest.TestCase):
 
     def test_repeated_bad_batches_do_not_extend_recovery_window(self):
         self.h.start(70,300)
-        for i in range(1,5):
+        for i in range(1,11):
             self.time=10+i*.5
             self.h.sensor_error('error')
             self.h.output()
         self.assertFalse(self.h.snapshot()['active'])
         self.assertTrue(self.h.snapshot()['fault'])
+
+    def test_recovery_after_three_seconds_is_allowed_with_output_off(self):
+        self.h.start(70,300)
+        self.h.sensor_error('temporary')
+        self.time+=3
+        self.assertEqual(self.h.output(),0)
+        self.assertTrue(self.h.snapshot()['active'])
+        self.h.sample([(25,23)]*3)
+        self.time+=.5
+        self.h.sample([(25,23)]*3)
+        self.assertGreater(self.h.output(),0)
+
+    def test_stale_output_is_zero_before_extended_timeout(self):
+        self.h.start(70,300)
+        self.h.sample([(25,23)]*3)
+        self.time+=2.1
+        self.assertEqual(self.h.output(),0)
+        self.assertTrue(self.h.snapshot()['active'])
+        self.assertTrue(self.h.snapshot()['recovering'])
+
+    def test_pid_does_not_accumulate_integral_at_full_power(self):
+        from panel.heating import PID
+        pid=PID(20,.1,0,65)
+        for t in range(100):self.assertEqual(pid.update(25,t),100)
+        self.assertEqual(pid.integral,0)
+        self.assertEqual(pid.update(66,100),0)
+
+    def test_minimum_duty_tapers_near_target(self):
+        self.h.start(65,300,dict(kp=1,ki=0,kd=0))
+        self.h.state['filtered']=64.5
+        self.h.sample([(64.5,23)]*3)
+        self.assertAlmostEqual(self.h.state['duty'],5)

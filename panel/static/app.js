@@ -54,9 +54,9 @@ async function status() {
     $('ambient').textContent = number(h.ambient) + ' °C';
     $('duty').textContent = number(h.duty, 0) + ' %';
     $('remaining').textContent = h.active ? duration(h.remaining_s) : '—';
-    badge('heater-status', h.active ? 'Heating' : h.fault ? 'Fault · Output off' : h.ready ? 'Standby' : 'Sensor not ready', h.fault ? 'error' : h.ready ? 'ok' : '');
+    badge('heater-status', h.recovering && !h.fault ? 'Retrying sensor · Output off' : h.active ? 'Heating' : h.fault ? 'Fault · Output off' : h.ready ? 'Standby' : 'Sensor not ready', h.fault ? 'error' : h.ready ? 'ok' : '');
     badge('camera-status', c.ready ? (c.running ? 'Acquiring' : 'Camera ready') : 'Camera not ready', c.ready ? 'ok' : 'error');
-    errorBox('heater-error', h.fault || (!h.enabled ? 'After checking the wiring, enable heating in the device configuration.' : null));
+    errorBox('heater-error', h.fault || h.warning || (!h.enabled ? 'After checking the wiring, enable heating in the device configuration.' : null));
     errorBox('camera-error', c.error);
     $('start-heat').disabled = !h.ready || !h.enabled || !!h.fault || h.active || !!active;
     $('start-camera').disabled = !c.ready || c.running || c.busy || c.pending || !!active;

@@ -237,7 +237,7 @@ class Assays:
             if not self.active:
                 return
             h,c=self.heater.snapshot(),self.camera.snapshot()
-            if h['fault'] or c['error'] or not h['ready'] or not c['ready']:
+            if h['fault'] or c['error'] or (not h['ready'] and not h.get('recovering')) or not c['ready']:
                 self.finish('failed',h['fault'] or c['error'] or 'An instrument became unavailable')
             elif self.clock() >= self.deadline:
                 self.finish('completed')

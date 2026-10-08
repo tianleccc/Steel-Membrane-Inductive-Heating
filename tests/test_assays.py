@@ -98,6 +98,10 @@ class AssayTests(unittest.TestCase):
         self.start()
         self.heater.sample([])
         self.manager.tick()
+        self.assertIsNotNone(self.manager.active)
+        self.now+=2.1
+        self.heater.output()
+        self.manager.tick()
         self.assertFalse(self.camera.snapshot()['running'])
         self.assertEqual(self.manager.last['status'],'failed')
 
@@ -210,3 +214,18 @@ class AssayTests(unittest.TestCase):
 
 
 if __name__=='__main__': unittest.main()
+    def test_assay_continues_after_transient_sensor_error(self):
+        record=self.start()
+        self.now+=.5
+        self.heater.sensor_error('temporary I2C error')
+        self.manager.tick()
+        self.assertEqual(self.manager.active['id'],record['id'])
+        self.assertEqual(self.heater.output(),0)
+        for _ in range(2):
+            self.now+=.5
+            self.heater.sample([(25,23)]*3)
+            self.manager.tick()
+        self.assertEqual(self.manager.active['id'],record['id'])
+        self.assertTrue(self.camera.snapshot()['running'])
+        self.assertTrue(self.heater.snapshot()['active'])
+        self.assertFalse(self.heater.snapshot()['recovering'])

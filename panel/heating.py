@@ -1,6 +1,7 @@
 """MLX90614 control adapted from the user's temp.py; no power at startup."""
 import csv
 import math
+import logging
 import threading
 import time
 from collections import deque
@@ -39,9 +40,11 @@ class Heater:
         self.pid = None
         self.deadline = 0
         self.last_sample = 0
+        self.good_batches = 0
         self.state = dict(ready=False, enabled=config['heater_enabled'], active=False,
                           temperature=None, ambient=None, filtered=None, target=None,
                           duty=0, fault=None, remaining_s=0, log=None, assay_id=None,
+                          recovering=False, warning=None,
                           gains={k: config[k] for k in ('kp', 'ki', 'kd')})
 
     def launch(self):
@@ -50,8 +53,9 @@ class Heater:
         self.quit.clear()
         with self.lock:
             self.last_sample = 0
+            self.good_batches = 0
             self.state.update(ready=False, active=False, temperature=None, ambient=None,
-                              filtered=None, target=None, duty=0)
+                              filtered=None, target=None, duty=0, recovering=False, warning=None)
         self.thread = threading.Thread(target=self.run, daemon=True, name='heater')
         self.thread.start()
 
@@ -118,7 +122,7 @@ class Heater:
             self.log = (folder/name).open('w', newline='', encoding='utf-8')
             self.writer = csv.writer(self.log)
             self.writer.writerow(['utc','object_c','ambient_c','filtered_c','target_c','duty_pct',
-                                  'assay_id','assay_name','operator','kp','ki','kd'])
+                                  'assay_id','assay_name','operator','kp','ki','kd','sample_status','sensor_error'])
             self.log.flush()
             self.pid = PID(gains['kp'], gains['ki'], gains['kd'], target)
             self.context = context
@@ -134,14 +138,46 @@ class Heater:
                 raise ValueError('Temperature still exceeds the safety cutoff')
             self.state['fault'] = None
 
+    def sensor_error(self, message):
+        with self.lock:
+            self._off()
+            self.good_batches = 0
+            self.state.update(ready=False, recovering=True, warning=str(message),
+                              temperature=None, ambient=None)
+            if self.pid:
+                self.pid.last = None
+            logging.warning('Temperature feedback paused: %s', message)
+            if self.writer:
+                self.writer.writerow([datetime.now(timezone.utc).isoformat(), '', '', '',
+                    self.state['target'], 0, self.context.get('id',''), '', '',
+                    self.pid.kp, self.pid.ki, self.pid.kd, 'retrying', str(message)])
+                self.log.flush()
+            if self.clock()-self.last_sample >= 2:
+                self._stop('Temperature feedback did not recover within 2 seconds. Heating is latched off.')
+
     def sample(self, readings):
         """Every sample must be valid; cutoff checks raw peaks before smoothing."""
         with self.lock:
+            # Overtemperature must never be hidden by another invalid sample.
+            if any(math.isfinite(o) and o >= self.c['cutoff_c'] for o,a in readings):
+                self._stop('Infrared temperature reached the safety cutoff')
             if not readings or any(not math.isfinite(o) or not math.isfinite(a)
                                    or not -40 < o < 300 or not -40 < a < 125 for o,a in readings):
-                self.state['ready'] = False
-                self._stop('Invalid infrared temperature reading. Heating is latched off.')
+                self.sensor_error('Invalid infrared temperature reading; output off while retrying')
                 return
+            recovered = self.state['recovering']
+            if recovered:
+                if self.clock()-self.last_sample >= 2 and self.state['active']:
+                    self._stop('Temperature feedback did not recover within 2 seconds. Heating is latched off.')
+                self.good_batches += 1
+                if self.good_batches < 2:
+                    self._off()
+                    return
+                self.state.update(recovering=False, warning=None)
+                self.state['filtered'] = None
+                if self.pid:
+                    self.pid.last = None
+                logging.info('Temperature feedback recovered after two valid batches')
             obj, amb = median(o for o,a in readings), median(a for o,a in readings)
             old = self.state['filtered']
             ema = obj if old is None else self.c['ema']*obj+(1-self.c['ema'])*old
@@ -168,7 +204,8 @@ class Heater:
                                       self.state['target'], self.state['duty'],
                                       self.context.get('id',''), cell(self.context.get('name','')),
                                       cell(self.context.get('operator','')),
-                                      self.pid.kp,self.pid.ki,self.pid.kd])
+                                      self.pid.kp,self.pid.ki,self.pid.kd,
+                                      'recovered' if recovered else 'valid',''])
                 self.log.flush()
 
     def output(self):
@@ -179,8 +216,11 @@ class Heater:
             if self.clock() >= self.deadline:
                 self._stop()
                 return 0
-            if self.clock()-self.last_sample > 2:
+            if self.clock()-self.last_sample >= 2:
                 self._stop('Temperature reading timed out')
+                return 0
+            if self.state['recovering'] or not self.state['ready']:
+                self._off()
                 return 0
             duty = self.state['duty']
             self.hw.set_duty(100 if self.c['burst'] and duty else duty)
@@ -205,9 +245,7 @@ class Heater:
                         if not self.quit.is_set():
                             self.sample(readings)
                     except Exception as exc:
-                        with self.lock:
-                            self.state['ready'] = False
-                            self._stop(f'MLX90614 read failed: {exc}')
+                        self.sensor_error(f'MLX90614 read failed: {exc}')
                 duty = self.output()
                 remaining = max(0, self.c['cycle_s']-(self.clock()-start))
                 if self.c['burst']:

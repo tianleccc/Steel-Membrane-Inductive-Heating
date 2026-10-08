@@ -51,6 +51,9 @@ class ControlTests(unittest.TestCase):
     def test_sensor_failure_latches_and_never_restarts_automatically(self):
         self.h.start(70,300)
         self.h.sample([])
+        self.time+=2.1
+        self.h.output()
+        self.h.sample([(25,23)]*3)
         self.h.sample([(25,23)]*3)
         self.assertFalse(self.h.snapshot()['active'])
         with self.assertRaises(ValueError): self.h.start(70,300)
@@ -61,7 +64,8 @@ class ControlTests(unittest.TestCase):
     def test_nan_fails_closed(self):
         self.h.start(70,300)
         self.h.sample([(float('nan'),23)])
-        self.assertFalse(self.h.snapshot()['active'])
+        self.assertTrue(self.h.snapshot()['active'])
+        self.assertEqual(self.h.output(),0)
         self.assertFalse(self.h.snapshot()['ready'])
 
     def test_duration_expiry_turns_off(self):
@@ -134,4 +138,47 @@ class ControlTests(unittest.TestCase):
         self.assertTrue(camera.snapshot()['preview_light'])
 
 
-if __name__=='__main__': unittest.main()
+
+
+    def test_transient_failure_recovers_only_after_two_valid_batches(self):
+        self.h.start(70,300)
+        deadline=self.h.deadline
+        self.time+=.5
+        self.h.sensor_error('I2C temporary error')
+        self.assertEqual(self.h.output(),0)
+        self.assertTrue(self.h.snapshot()['active'])
+        self.time+=.5
+        self.h.sample([(26,23)]*3)
+        self.assertEqual(self.h.output(),0)
+        self.assertTrue(self.h.snapshot()['recovering'])
+        self.time+=.5
+        self.h.sample([(26,23)]*3)
+        self.assertGreater(self.h.output(),0)
+        self.assertIsNone(self.h.snapshot()['fault'])
+        self.assertFalse(self.h.snapshot()['recovering'])
+        self.assertEqual(deadline,self.h.deadline)
+
+    def test_late_valid_read_cannot_resume_faulted_heating(self):
+        self.h.start(70,300)
+        self.h.sensor_error('error')
+        self.time+=2.1
+        self.h.sample([(25,23)]*3)
+        self.h.sample([(25,23)]*3)
+        self.assertFalse(self.h.snapshot()['active'])
+        self.assertTrue(self.h.snapshot()['fault'])
+        self.assertEqual(self.h.output(),0)
+
+    def test_mixed_invalid_and_overtemperature_stops_immediately(self):
+        self.h.start(70,300)
+        self.h.sample([(float('nan'),23),(111,23)])
+        self.assertFalse(self.h.snapshot()['active'])
+        self.assertIn('cutoff',self.h.snapshot()['fault'])
+
+    def test_repeated_bad_batches_do_not_extend_recovery_window(self):
+        self.h.start(70,300)
+        for i in range(1,5):
+            self.time=10+i*.5
+            self.h.sensor_error('error')
+            self.h.output()
+        self.assertFalse(self.h.snapshot()['active'])
+        self.assertTrue(self.h.snapshot()['fault'])

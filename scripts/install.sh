@@ -8,6 +8,7 @@ fi
 sudo apt-get update
 sudo apt-get install -y git python3-venv python3-picamera2 python3-gpiozero python3-lgpio i2c-tools
 sudo raspi-config nonint do_i2c 0
+sudo bash scripts/configure-sensor-bus.sh
 python3 -m venv --system-site-packages .venv
 .venv/bin/pip install -r requirements.txt
 if [[ ! -f config.json ]]; then cp config.example.json config.json; fi

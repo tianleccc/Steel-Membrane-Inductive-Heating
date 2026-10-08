@@ -18,8 +18,8 @@ Turn off the Raspberry Pi and the external load supplies before changing wiring.
 |---|---|---|---|
 | Heating MOSFET / driver control input | BCM GPIO 24 | **18** | Active HIGH; default PWM frequency: 100 Hz. Connect to the driver's logic input or an appropriate MOSFET gate interface. |
 | Fluorescence excitation LED MOSFET / driver control input | BCM GPIO 16 | **36** | Active HIGH by default. Set `led_active_low` to `true` only if required by the driver. |
-| MLX90614 SDA | BCM GPIO 2 / SDA1 | **3** | I2C data; default sensor address: `0x5A`. |
-| MLX90614 SCL | BCM GPIO 3 / SCL1 | **5** | I2C clock; bus 1 (`/dev/i2c-1`). |
+| MLX90614 SDA | BCM GPIO 5 | **29** | I2C data; default sensor address: `0x5A`. |
+| MLX90614 SCL | BCM GPIO 6 | **31** | Software I2C clock; bus 20 (`/dev/i2c-20`). |
 | MLX90614 GND | GND | **6**, or another GND pin | Connect the sensor ground to the Pi ground. |
 | MLX90614 VCC / VIN | 3.3 V, **only if supported by the specific sensor module** | **1** or **17**, for a 3.3 V-compatible module | Verify the module's supply specification first. Different MLX90614 variants and breakout boards have different supply requirements. |
 | Heating driver signal ground | GND | **14**, for example | Common signal reference for a non-isolated driver; follow the driver manufacturer's wiring requirements. |
@@ -38,6 +38,28 @@ The ground pin choices are suggested wiring positions, not software settings or 
 
 The temperature sensor for this project is **MLX90614 over I2C**. The earlier MAX31855/SPI script is not used. Heating uses **GPIO 24**, as confirmed for this setup; the GPIO 20 comment in the original `temp.py` was inconsistent with its default argument.
 
+### Sensor bus on GPIO5 / GPIO6
+
+This device uses Linux software I2C bus 20. GPIO5 is SDA (physical pin 29),
+GPIO6 is SCL (physical pin 31). The boot overlay is:
+
+```ini
+[all]
+dtoverlay=i2c-gpio,bus=20,i2c_gpio_sda=5,i2c_gpio_scl=6,i2c_gpio_delay_us=5
+```
+
+The installer adds this configuration using `scripts/configure-sensor-bus.sh`.
+Reboot after first installation to create `/dev/i2c-20`. For an existing device,
+run `sudo bash scripts/configure-sensor-bus.sh`, set `sensor_bus` to `20` in
+`config.json`, and reboot. The application explicitly opens the numbered Linux
+bus using Adafruit Extended Bus; it no longer implicitly selects GPIO2/3.
+
+GPIO5/6 do not have the dedicated external I2C pull-ups provided on GPIO2/3.
+Ensure the sensor module has suitable pull-ups to **3.3 V** on both SDA and SCL;
+if absent, add external resistors (typically 4.7 kOhm on short wiring).
+Keep signal wiring short and away from heating power wiring. Changing pins alone
+cannot guarantee that electrical noise, grounding or supply problems disappear.
+
 ### Configuration corresponding to the wiring
 
 Device-specific settings are stored in the untracked `config.json` file:
@@ -48,7 +70,8 @@ Device-specific settings are stored in the untracked `config.json` file:
   "heater_gpio": 24,
   "led_gpio": 16,
   "led_active_low": false,
-  "sensor_address": 90
+  "sensor_address": 90,
+  "sensor_bus": 20
 }
 ```
 

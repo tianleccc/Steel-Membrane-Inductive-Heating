@@ -6,6 +6,7 @@
   "led_gpio": 16,
   "led_active_low": false,
   "sensor_address": 90,
+  "sensor_bus": 20,
   "cutoff_c": 110,
   "max_duration_s": 7200,
   "pwm_hz": 100,

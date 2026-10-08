@@ -213,7 +213,7 @@ class AssayTests(unittest.TestCase):
             self.assertFalse(self.camera.save(record,106))
 
 
-if __name__=='__main__': unittest.main()
+
     def test_assay_continues_after_transient_sensor_error(self):
         record=self.start()
         self.now+=.5
@@ -229,3 +229,4 @@ if __name__=='__main__': unittest.main()
         self.assertTrue(self.camera.snapshot()['running'])
         self.assertTrue(self.heater.snapshot()['active'])
         self.assertFalse(self.heater.snapshot()['recovering'])
+

@@ -158,7 +158,7 @@ Service restarts do not resume assays. Runs that were active are marked **interr
 
 ## Temperature control and protection
 
-The editable PID controls start with the device defaults: `Kp=12`, `Ki=0.05`, and `Kd=0.1`. Every five 0.1-second cycles, it switches heating output off for infrared sampling. Three readings are combined using a median and an exponential moving average (EMA).
+The editable PID controls start with the device defaults: `Kp=20`, `Ki=0.1`, and `Kd=0`. Every five 0.1-second cycles, it switches heating output off for infrared sampling. Three readings are combined using a median and an exponential moving average (EMA).
 
 Sensor failures, invalid values, stale readings, or a raw sample reaching the default **110 °C** cutoff latch heating off. Once valid readings return and the temperature is below the cutoff, clear the fault manually before starting another run. Cutoff detection checks individual raw readings before median/EMA filtering. PID gains can be configured before a run, from 0 to 1000 each, with at least one nonzero gain. The existing minimum-duty rule and output slew setting remain in the device configuration; final output never exceeds 100%. Old `duty_cap` entries in local configuration are ignored.
 

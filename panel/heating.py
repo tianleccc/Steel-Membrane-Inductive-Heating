@@ -45,6 +45,13 @@ class Heater:
                           gains={k: config[k] for k in ('kp', 'ki', 'kd')})
 
     def launch(self):
+        if self.thread and self.thread.is_alive():
+            raise ValueError('Temperature worker is still running')
+        self.quit.clear()
+        with self.lock:
+            self.last_sample = 0
+            self.state.update(ready=False, active=False, temperature=None, ambient=None,
+                              filtered=None, target=None, duty=0)
         self.thread = threading.Thread(target=self.run, daemon=True, name='heater')
         self.thread.start()
 
@@ -219,7 +226,12 @@ class Heater:
                 self._stop()
                 self.state['ready'] = False
             if self.hw:
-                self.hw.close()
+                with self.lock:
+                    try:
+                        self.hw.close()
+                    finally:
+                        self.hw = None
+                        self.state.update(temperature=None, ambient=None, filtered=None)
 
     def close(self):
         self.quit.set()

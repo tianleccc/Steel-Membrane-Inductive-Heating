@@ -15,24 +15,23 @@ def main():
     app=create_app(config)
     heater,camera=app.extensions['heater'],app.extensions['camera']
     assays=app.extensions['assays']
+    power=app.extensions['power']
     def shutdown(*_):
         raise SystemExit(0)
     signal.signal(signal.SIGTERM,shutdown)
     signal.signal(signal.SIGINT,shutdown)
     try:
-        heater.launch()
-        camera.launch()
+        power.boot()
         assays.launch()
         serve(app,host=config['host'],port=config['port'],threads=8)
     finally:
         try:
-            try:
-                assays.close()
-            finally:
-                heater.close()
+            assays.close()
         finally:
-            camera.close()
-            lock.close()
+            try:
+                power.close()
+            finally:
+                lock.close()
 
 
 if __name__=='__main__':

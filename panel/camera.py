@@ -29,6 +29,14 @@ class Camera:
         self.photos.mkdir(parents=True, exist_ok=True)
 
     def launch(self):
+        if self.thread and self.thread.is_alive():
+            raise ValueError('Camera worker is still running')
+        self.quit.clear()
+        self.cancel.clear()
+        with self.lock:
+            self.frame = None
+            self.frame_at = 0
+            self.state.update(ready=False, error=None, busy=False, running=False)
         self.thread = threading.Thread(target=self.run, daemon=True, name='camera')
         self.thread.start()
 
@@ -207,9 +215,17 @@ class Camera:
             with self.lock:
                 self.state['ready'] = False
             if self.led:
-                self.led.close()
+                with self.lock:
+                    self.led.close()
+                    self.led = None
             if self.cam:
-                self.cam.close()
+                try:
+                    self.cam.close()
+                finally:
+                    self.cam = None
+            with self.lock:
+                self.frame = None
+                self.frame_at = 0
 
     def close(self):
         self.quit.set()

@@ -235,6 +235,24 @@ ZIP preparation needs local free space. Only the latest ZIP is retained in
 previous ZIP, so download it before starting another export. USB exports are
 independent copies and are not cleared by the panel.
 
+## Instrument sleep and wake
+
+Use **Sleep instruments** at the top of the panel after stopping any assay,
+heating or acquisition. Sleep stops both hardware workers, closes the camera and
+I2C connection, and turns heating and excitation outputs off. The web server,
+archive, downloads and USB exports stay available. There are no temperature
+readings or live images while asleep. **Wake instruments** reinitializes both
+instruments; wait for readiness before starting a new run. Experiments never
+resume automatically. Existing heating faults still require explicit clearing
+after valid readings return.
+
+Sleep is remembered across service restarts in `data/instrument-power.json`.
+This is instrument sleep, not OS suspend: the Pi, network and desktop keep running.
+The sensor supply remains physically connected; stopping reads does not cut its
+power. Fully disconnecting sensor power requires additional switched hardware.
+Stopping the camera and image processing should reduce load, but the exact
+power and temperature reduction depends on the hardware and desktop workload.
+
 ## Offline desktop console
 
 On a Pi with Raspberry Pi OS Desktop and Chromium, open **Steel Membrane Console**

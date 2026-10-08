@@ -84,18 +84,33 @@ async function status() {
       $('assay-progress').value = active ? Math.min(1, 1 - a.remaining_s / (display.duration_minutes * 60)) : display.status === 'completed' ? 1 : 0;
     }
     errorBox('assay-error', a.error || (!active && display?.reason ? display.reason : null));
+    const mode = state.power.mode, awake = mode === 'awake';
+    $('power-state').textContent = {awake: 'Instruments awake', asleep: 'Instruments asleep', sleeping: 'Putting instruments to sleep…', waking: 'Waking instruments…', error: 'Instrument power error'}[mode];
+    $('sleep-instruments').disabled = mode !== 'awake' || !!active || h.active || c.running || c.busy || c.pending;
+    $('wake-instruments').disabled = !['asleep', 'error'].includes(mode);
+    errorBox('power-error', state.power.error);
+    if (!awake) {
+      for (const id of ['start-heat', 'start-camera', 'capture', 'light', 'start-assay', 'reset']) $(id).disabled = true;
+      lightWanted = false; $('light').checked = false;
+      $('temp').textContent = '—'; $('ambient').textContent = '—';
+      badge('heater-status', mode === 'asleep' ? 'Sleeping · No readings' : 'Not ready');
+      badge('camera-status', mode === 'asleep' ? 'Sleeping · Camera closed' : 'Not ready');
+      $('preview').hidden = true; $('preview-empty').hidden = false;
+      $('preview-empty').textContent = 'Instruments are asleep or transitioning. Wake to resume preview.';
+    } else $('preview-empty').textContent = 'Waiting for camera preview…';
+
   } catch (error) {
     online = false;
     badge('connection', 'Disconnected', 'error');
-    for (const id of ['start-heat', 'start-camera', 'capture', 'light', 'start-assay']) $(id).disabled = true;
+    for (const id of ['start-heat', 'start-camera', 'capture', 'light', 'start-assay', 'sleep-instruments', 'wake-instruments']) $(id).disabled = true;
     $('temp').textContent = '—'; $('remaining').textContent = 'Unknown';
     badge('heater-status', 'Status unknown', 'error');
     errorBox('heater-error', 'Connection lost. Active heating or assay jobs may still be running.');
   }
 }
-async function poll() { await status(); setTimeout(poll, 1500); }
+async function poll() { await status(); setTimeout(poll, state?.power?.mode === 'asleep' ? 5000 : 1500); }
 async function preview() {
-  if (!document.hidden && !$('live').hidden) {
+  if (state?.power?.mode === 'awake' && !document.hidden && !$('live').hidden) {
     try {
       const response = await fetch('/preview.jpg?t=' + Date.now(), {signal: AbortSignal.timeout(5000)});
       if (!response.ok) throw Error();
@@ -364,3 +379,6 @@ $('eject-usb').onclick = async () => {
   } catch (error) { $('usb-note').textContent = error.message; }
   finally { $('eject-usb').disabled = false; }
 };
+
+$('sleep-instruments').onclick = () => act('power', {action: 'sleep'}, 'Putting instruments to sleep');
+$('wake-instruments').onclick = () => act('power', {action: 'wake'}, 'Waking instruments. Experiments will not resume automatically.');

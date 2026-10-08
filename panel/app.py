@@ -14,6 +14,7 @@ from .camera import Camera
 from .hardware import IRHardware
 from .heating import Heater
 from .exports import Exports
+from .power import Power
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -43,6 +44,8 @@ def create_app(config=None, heater=None, camera=None):
     heater = heater or Heater(c, IRHardware)
     camera = camera or Camera(c, heater.snapshot)
     assays = Assays(c, heater, camera)
+    power = Power(assays)
+    app.extensions['power'] = power
     archive = assays.archive
     exports = Exports(assays)
     app.extensions['exports'] = exports
@@ -88,7 +91,11 @@ def create_app(config=None, heater=None, camera=None):
     def status():
         disk=shutil.disk_usage(c['data_dir'])
         return jsonify(heater=heater.snapshot(),camera=camera.snapshot(),assay=assays.snapshot(),
-                       free_gb=round(disk.free/1e9,2))
+                       free_gb=round(disk.free/1e9,2), power=power.snapshot())
+
+    @app.post('/api/power')
+    def instrument_power():
+        return jsonify(power.request(body().get('action')))
 
     @app.get('/api/history')
     def history():
@@ -100,6 +107,7 @@ def create_app(config=None, heater=None, camera=None):
         data=body()
         with assays.lock:
             assays.standalone()
+            power.require_awake()
             exports.protect('unassigned')
             if 'duty_cap' in data or 'duration' in data:
                 raise ValueError('This page is outdated. Refresh to use minutes and PID controls.')
@@ -127,6 +135,7 @@ def create_app(config=None, heater=None, camera=None):
         data=body()
         with assays.lock:
             assays.standalone()
+            power.require_awake()
             exports.protect('unassigned')
             camera.start(data.get('interval'),data.get('count'))
         return jsonify(ok=True)
@@ -135,6 +144,7 @@ def create_app(config=None, heater=None, camera=None):
     def capture():
         with assays.lock:
             assays.standalone()
+            power.require_awake()
             exports.protect('unassigned')
             camera.capture()
         return jsonify(ok=True)
@@ -157,6 +167,7 @@ def create_app(config=None, heater=None, camera=None):
             raise ValueError('enabled and renew must be boolean values')
         with assays.lock:
             if enabled:
+                power.require_awake()
                 assays.standalone()
             camera.light(enabled,renew=renew)
         return jsonify(ok=True)
@@ -182,7 +193,9 @@ def create_app(config=None, heater=None, camera=None):
 
     @app.post('/api/assays/start')
     def assay_start():
-        return jsonify(assays.start(body()))
+        with assays.lock:
+            power.require_awake()
+            return jsonify(assays.start(body()))
 
     @app.post('/api/assays/stop')
     def assay_stop():

@@ -37,7 +37,7 @@ class ExportTests(unittest.TestCase):
         return dict(id='/dev/test-usb', label='Test USB', mount=str(path),
                     free_bytes=10**10, identity=(stat.st_dev,stat.st_ino))
 
-    def test_zip_contains_all_originals_metadata_no_thumbnails_or_logs(self):
+    def test_zip_contains_only_numbered_originals(self):
         aid = self.record()
         reply = self.post('exports',dict(assay_id=aid,mode='photos'))
         self.assertEqual(reply.status_code,200,reply.text)
@@ -46,8 +46,7 @@ class ExportTests(unittest.TestCase):
         response = self.client.get('/exports/'+state['id']+'/download')
         with zipfile.ZipFile(io.BytesIO(response.data)) as z:
             names=z.namelist()
-            self.assertEqual(len(names),3)
-            self.assertTrue(any(n.endswith('assay.json') for n in names))
+            self.assertEqual(names, ['USB _ trial/image001.jpg'])
             self.assertFalse(any('thumb' in n or n.endswith('.csv') for n in names))
             self.assertEqual(z.read(next(n for n in names if n.endswith('.jpg'))),b'original')
         response.close()
@@ -65,11 +64,30 @@ class ExportTests(unittest.TestCase):
                 self.assertEqual(result['status'],'complete',result)
                 destinations.append(result['destination'])
                 folder=Path(result['destination'])
-                self.assertTrue((folder/'assay.json').is_file())
-                self.assertEqual(len(list((folder/'photos').iterdir())),3)
-                self.assertEqual(len(list((folder/'logs').iterdir())),1)
-            self.assertNotEqual(*destinations)
+                self.assertEqual([p.name for p in folder.iterdir()], ['image001.jpg'])
+                self.assertEqual((folder/'image001.jpg').read_bytes(), b'original')
+            self.assertEqual([Path(d).name for d in destinations], ['USB _ trial', 'USB _ trial (2)'])
             self.assertEqual((Path(tmp)/'existing.txt').read_text(),'keep')
+
+    def test_numbering_preserves_capture_order_and_originals(self):
+        aid = self.record()
+        folder = self.manager.archive.folder(aid)/'photos'
+        (folder/'20000101T000000_000000Z.jpg').write_bytes(b'first')
+        (folder/'20990101T000000_000000Z.jpg').write_bytes(b'last')
+        state = self.wait(self.post('exports', dict(assay_id=aid, mode='photos')).json)
+        response = self.client.get('/exports/'+state['id']+'/download')
+        with zipfile.ZipFile(io.BytesIO(response.data)) as z:
+            self.assertEqual(z.namelist(), ['USB _ trial/image001.jpg', 'USB _ trial/image002.jpg', 'USB _ trial/image003.jpg'])
+            self.assertEqual([z.read(n) for n in z.namelist()], [b'first', b'original', b'last'])
+        response.close()
+        self.assertTrue((folder/'20000101T000000_000000Z.jpg').exists())
+
+    def test_export_names_preserve_unicode_and_spaces(self):
+        from panel.exports import export_name
+        self.assertEqual(export_name('实验 A 01'), '实验 A 01')
+        self.assertEqual(export_name('../trial'), '.._trial')
+        self.assertEqual(export_name('CON'), '_CON')
+        self.assertEqual(export_name('...'), 'Assay')
 
     def test_usb_missing_low_space_changed_mount_and_write_failure(self):
         aid=self.record()

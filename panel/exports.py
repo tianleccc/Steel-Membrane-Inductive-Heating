@@ -12,6 +12,16 @@ import uuid
 import zipfile
 
 
+def export_name(value):
+    """Keep the assay name, replacing only characters unsafe on common USB filesystems."""
+    name = re.sub(r'[<>:"/\\|?*\x00-\x1f]', '_', value).strip().rstrip('.')[:120].rstrip(' .')
+    if not name or name in ('.', '..'):
+        name = 'Assay'
+    if re.fullmatch(r'(?i)(CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])(?:\..*)?', name):
+        name = '_' + name
+    return name
+
+
 def sync_filesystem(fd):
     """Flush file data AND filesystem-wide allocation metadata (including FAT)."""
     libc = ctypes.CDLL(None, use_errno=True)
@@ -80,32 +90,27 @@ class Exports:
                 raise ValueError('An export is already in progress')
             self.assays.assert_deletable(assay_id)
             folder = self.assays.archive.folder(assay_id)
-            files = []
-            for kind, pattern in [('photos', '*'), ('logs', '*.csv')]:
-                if mode == 'photos' and kind == 'logs':
-                    continue
-                if (folder/kind).is_symlink():
-                    raise ValueError('Cannot export linked folders')
-                for path in sorted((folder/kind).glob(pattern)):
-                    if path.is_symlink():
-                        raise ValueError('Cannot export linked files')
-                    if path.is_file() and path.suffix in ('.jpg', '.json', '.csv'):
-                        if mode == 'photos' and path.name.endswith('.thumb.jpg'):
-                            continue
-                        files.append((path, path.relative_to(folder)))
+            photos = folder/'photos'
+            if photos.is_symlink():
+                raise ValueError('Cannot export linked folders')
+            originals = []
+            # Capture filenames are UTC timestamps, so lexical order is acquisition order.
+            for path in sorted(photos.glob('*')):
+                if path.is_symlink():
+                    raise ValueError('Cannot export linked files')
+                if path.is_file() and path.suffix == '.jpg' and not path.name.endswith('.thumb.jpg'):
+                    originals.append(path)
+            files = [(path, Path(f'image{index:03d}.jpg'))
+                     for index, path in enumerate(originals, 1)]
             manifest = folder/'assay.json'
-            name = assay_id
+            name = 'Unassigned'
             if assay_id != 'unassigned':
                 if manifest.is_symlink():
                     raise ValueError('Cannot export a linked manifest')
                 record = json.loads(manifest.read_text(encoding='utf-8'))
-                name = re.sub(r'[^A-Za-z0-9_-]+', '_', record['name']).strip('_')[:60] or 'Assay'
-                name += '_' + assay_id
-                files.append((manifest, Path('assay.json')))
-            if not any(path.suffix == '.jpg' and not path.name.endswith('.thumb.jpg') for path,_ in files) and mode == 'photos':
-                raise ValueError('This folder has no photos')
+                name = export_name(record['name'])
             if not files:
-                raise ValueError('This folder is empty')
+                raise ValueError('This folder has no photos')
             drive = None
             if mode == 'usb':
                 drive = next((d for d in self.drives() if d['id'] == drive_id), None)
@@ -154,7 +159,16 @@ class Exports:
                             os.fsync(d)
                         finally:
                             os.close(d)
-                final = job['name'] + '_' + job['id'][:8]
+                final = job['name']
+                number = 2
+                while True:
+                    try:
+                        # Reserve exclusively: never replace an existing export, even if empty.
+                        os.mkdir(final, dir_fd=fd)
+                        break
+                    except FileExistsError:
+                        final = f"{job['name']} ({number})"
+                        number += 1
                 os.rename(partial, final, src_dir_fd=fd, dst_dir_fd=fd)
                 os.fsync(fd)
                 with self.lock:

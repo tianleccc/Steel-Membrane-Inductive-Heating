@@ -207,14 +207,18 @@ Back up `data/` and `config.json` separately. To duplicate the system, use the i
 
 Open **Photo archive**, then open an assay folder:
 
-- **Download all photos (ZIP)** prepares every original photo in the folder, plus
-  photo metadata and the assay manifest. It ignores the current date filter and
-  excludes thumbnails and temperature CSVs. When preparation finishes, click
-  **Download ready ZIP** to save it on the computer running the browser.
-- **Export assay to USB** copies the complete assay (originals, thumbnails,
-  metadata, temperature logs and assay manifest) into a new folder on a USB drive
-  connected to the **Raspberry Pi**. Select the drive and click the export button.
-  It also works offline from the desktop console. No existing USB files are overwritten.
+- **Download all photos (ZIP)** creates a ZIP containing one folder named after
+  the assay entered in the panel. Extract it to get the photo folder.
+- **Export assay to USB** creates the same photo folder directly on a USB drive
+  connected to the **Raspberry Pi**, including when using the offline desktop console.
+- Both exports contain only original JPEG images, in capture order, named
+  `image001.jpg`, `image002.jpg`, and so on. JSON metadata, thumbnails, and logs
+  are not included. Temperature logs remain available through their separate download.
+- Spaces and Unicode in assay names are preserved; filesystem-invalid characters
+  are replaced with underscores. If a USB folder already exists, a suffix such as
+  ` (2)` is added so previous exports are never overwritten.
+- Photo exports include the entire assay regardless of the current date filter.
+  Wait for ZIP preparation, then click **Download ready ZIP** to save it.
 
 Finish or stop the assay before exporting. Export progress appears in the archive;
 closing the page does not stop copying. Reopen the archive to check the latest job.

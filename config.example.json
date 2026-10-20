@@ -15,7 +15,7 @@
   "off_window_s": 0.01,
   "sample_every": 5,
   "samples": 3,
-  "kp": 20.0,
+  "kp": 50.0,
   "ki": 0.1,
   "kd": 0.0,
   "ema": 0.3,

@@ -12,7 +12,6 @@
   "max_duration_s": 7200,
   "pwm_hz": 100,
   "cycle_s": 0.1,
-  "off_window_s": 0.01,
   "sample_every": 5,
   "samples": 3,
   "kp": 50.0,

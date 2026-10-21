@@ -253,13 +253,11 @@ class Heater:
             while not self.quit.is_set():
                 start = self.clock()
                 if index % self.c['sample_every'] == 0:
-                    # Sensor I/O happens only with the heater physically off.
-                    with self.lock:
-                        self.hw.set_duty(0)
+                    # Sample without interrupting the current heating output.
                     try:
                         readings = []
                         for _ in range(self.c['samples']):
-                            if self.quit.wait(self.c['off_window_s']/self.c['samples']):
+                            if self.quit.is_set():
                                 break
                             readings.append(self.hw.read())
                         if not self.quit.is_set():

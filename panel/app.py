@@ -30,7 +30,7 @@ def load_config():
         raise ValueError('sensor_recovery_s must be between 2 and 10 seconds')
     if config['heater_gpio'] == config['led_gpio']:
         raise ValueError('Heater and LED must use different GPIO pins')
-    if not (0 < config['cycle_s'] <= 1 and 0 < config['off_window_s'] < config['cycle_s']
+    if not (0 < config['cycle_s'] <= 1
             and 1 <= config['sample_every'] <= 10
             and config['sample_every']*config['cycle_s'] <= 1
             and 1 <= config['samples'] <= 10 and 0 < config['ema'] <= 1

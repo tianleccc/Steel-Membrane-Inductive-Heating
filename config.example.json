@@ -2,7 +2,7 @@
   "host": "0.0.0.0",
   "port": 8080,
   "heater_enabled": false,
-  "heater_gpio": 24,
+  "heater_gpio": 23,
   "led_gpio": 16,
   "led_active_low": false,
   "sensor_address": 90,

@@ -8,7 +8,7 @@ Open `http://<raspberry-pi-ip>:8080` in a browser on the same network.
 
 ### Pin numbering
 
-The software uses **BCM GPIO numbers**, not physical header positions. For example, `heater_gpio: 24` means **GPIO 24 on physical pin 18**, not physical pin 24. The connections below refer to the Raspberry Pi 5 **40-pin GPIO header**.
+The software uses **BCM GPIO numbers**, not physical header positions. For example, `heater_gpio: 23` means **GPIO 23 on physical pin 16**, not physical pin 23. The connections below refer to the Raspberry Pi 5 **40-pin GPIO header**.
 
 Turn off the Raspberry Pi and the external load supplies before changing wiring. Identify physical pin 1 using the board markings and the [official Raspberry Pi GPIO reference](https://www.raspberrypi.com/documentation/computers/raspberry-pi.html#gpio).
 
@@ -16,7 +16,7 @@ Turn off the Raspberry Pi and the external load supplies before changing wiring.
 
 | Device / connection | Raspberry Pi signal | Physical header pin | Notes |
 |---|---|---|---|
-| Heating MOSFET / driver control input | BCM GPIO 24 | **18** | Active HIGH; default PWM frequency: 100 Hz. Connect to the driver's logic input or an appropriate MOSFET gate interface. |
+| Heating MOSFET / driver control input | BCM GPIO 23 | **16** | Active HIGH; default PWM frequency: 100 Hz. Connect to the driver's logic input or an appropriate MOSFET gate interface. |
 | Fluorescence excitation LED MOSFET / driver control input | BCM GPIO 16 | **36** | Active HIGH by default. Set `led_active_low` to `true` only if required by the driver. |
 | MLX90614 SDA | BCM GPIO 5 | **29** | I2C data; default sensor address: `0x5A`. |
 | MLX90614 SCL | BCM GPIO 6 | **31** | Software I2C clock; bus 20 (`/dev/i2c-20`). |
@@ -36,7 +36,7 @@ The ground pin choices are suggested wiring positions, not software settings or 
 - Use a suitable hardware pull-down on each active-HIGH MOSFET gate or control input so the load stays off while the Pi boots or the GPIO is unconfigured. Confirm compatibility with the actual driver circuit.
 - Load-side terminal assignments depend on the MOSFET/driver module. Follow its documentation for power input and load output wiring; those assignments cannot be inferred from this repository.
 
-The temperature sensor for this project is **MLX90614 over I2C**. Each read validates the SMBus PEC (CRC-8) and sensor error bit before accepting the temperature. Corrupt reads enter the output-off retry path. A valid overtemperature sample still stops heating; its raw peak and sample batch are recorded in the fault message and CSV before closing the log. The earlier MAX31855/SPI script is not used. Heating uses **GPIO 24**, as confirmed for this setup; the GPIO 20 comment in the original `temp.py` was inconsistent with its default argument.
+The temperature sensor for this project is **MLX90614 over I2C**. Each read validates the SMBus PEC (CRC-8) and sensor error bit before accepting the temperature. Corrupt reads enter the output-off retry path. A valid overtemperature sample still stops heating; its raw peak and sample batch are recorded in the fault message and CSV before closing the log. The earlier MAX31855/SPI script is not used. Heating uses **GPIO 23 (physical pin 16)**; move the heater control wire from the previous GPIO 24 (physical pin 18) when updating an existing installation, and set `heater_gpio` to `23` in its `config.json`.
 
 ### Sensor bus on GPIO5 / GPIO6
 
@@ -67,7 +67,7 @@ Device-specific settings are stored in the untracked `config.json` file:
 ```json
 {
   "heater_enabled": false,
-  "heater_gpio": 24,
+  "heater_gpio": 23,
   "led_gpio": 16,
   "led_active_low": false,
   "sensor_address": 90,

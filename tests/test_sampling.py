@@ -45,7 +45,7 @@ class SamplingTests(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as folder:
             config = json.loads(Path('config.example.json').read_text())
-            config.update(data_dir=folder, heater_enabled=True, sample_every=1)
+            config.update(data_dir=folder, heater_enabled=True, sample_every=1, startup_pulse=False)
             hardware = Hardware()
             heater = Heater(config, lambda c: hardware, clock=lambda: 10.0)
             heater.sample([(25, 23)] * 3)

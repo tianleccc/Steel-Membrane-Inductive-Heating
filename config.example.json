@@ -3,6 +3,7 @@
   "port": 8080,
   "heater_enabled": false,
   "heater_gpio": 23,
+  "startup_pulse": true,
   "led_gpio": 16,
   "led_active_low": false,
   "sensor_address": 90,

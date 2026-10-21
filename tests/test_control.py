@@ -16,7 +16,7 @@ class ControlTests(unittest.TestCase):
     def setUp(self):
         self.folder=tempfile.TemporaryDirectory()
         self.c=json.loads(Path('config.example.json').read_text())
-        self.c.update(data_dir=self.folder.name,heater_enabled=True)
+        self.c.update(data_dir=self.folder.name,heater_enabled=True,startup_pulse=False)
         self.time=10.0
         self.h=Heater(self.c,None,clock=lambda:self.time)
         self.h.hw=Hardware()

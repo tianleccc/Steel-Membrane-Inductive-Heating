@@ -43,6 +43,8 @@ class Heater:
         self.writer = None
         self.pid = None
         self.deadline = 0
+        self.startup_phase = None
+        self.startup_at = 0
         self.recovery_timeout = config.get('sensor_recovery_s', 5.0)
         self.last_sample = 0
         self.good_batches = 0
@@ -76,6 +78,7 @@ class Heater:
         self.state['duty'] = 0
 
     def _stop(self, fault=None):
+        self.startup_phase = None
         self.state['active'] = False
         self.state['remaining_s'] = 0
         if fault:
@@ -132,6 +135,8 @@ class Heater:
             self.pid = PID(gains['kp'], gains['ki'], gains['kd'], target)
             self.context = context
             self.deadline = self.clock()+duration
+            self.startup_phase = ('pending' if self.c.get('startup_pulse', False)
+                                  and self.state['filtered'] < target else None)
             self.state.update(active=True, target=target, log=name, duty=0,
                               assay_id=context.get('id'), gains=gains)
 
@@ -156,6 +161,7 @@ class Heater:
 
     def sensor_error(self, message):
         with self.lock:
+            self.startup_phase = None
             self._off()
             self.good_batches = 0
             self.state.update(ready=False, recovering=True, warning=str(message),
@@ -204,14 +210,8 @@ class Heater:
             if self.state['active']:
                 if self.clock() >= self.deadline:
                     self._stop()
-                else:
-                    requested = self.pid.update(ema, self.clock())
-                    if ema < self.pid.target:
-                        # Retain the boost far below target; taper its floor over the final 3 C.
-                        floor = self.c['min_duty'] * min(1, (self.pid.target-ema)/3)
-                        requested = max(requested, floor)
-                    self.state['duty'] = min(requested, 100,
-                                             self.state['duty']+self.c['slew'])
+                elif self.startup_phase is None:
+                    self._update_pid_duty(ema)
             self.history.append(dict(t=time.time(), temperature=obj, target=self.state['target'],
                                      duty=self.state['duty']))
             if self.writer:
@@ -225,6 +225,15 @@ class Heater:
                                       self.pid.kp,self.pid.ki,self.pid.kd,
                                       'recovered' if recovered else 'valid',''])
                 self.log.flush()
+
+    def _update_pid_duty(self, ema):
+        requested = self.pid.update(ema, self.clock())
+        if ema < self.pid.target:
+            # Retain the boost far below target; taper its floor over the final 3 C.
+            floor = self.c['min_duty'] * min(1, (self.pid.target-ema)/3)
+            requested = max(requested, floor)
+        self.state['duty'] = min(requested, 100,
+                                 self.state['duty']+self.c['slew'])
 
     def output(self):
         with self.lock:
@@ -242,6 +251,28 @@ class Heater:
             if self.state['recovering'] or not self.state['ready']:
                 self._off()
                 return 0
+            if self.startup_phase is not None:
+                now = self.clock()
+                # Never force a pulse once the target has already been reached.
+                if self.state['temperature'] >= self.pid.target or self.state['filtered'] >= self.pid.target:
+                    self.startup_phase = None
+                    self._off()
+                    return 0
+                if self.startup_phase == 'pending':
+                    self.startup_phase, self.startup_at = 'high', now
+                elif self.startup_phase == 'high' and now-self.startup_at >= 0.1:
+                    self.startup_phase, self.startup_at = 'low', now
+                elif self.startup_phase == 'low' and now-self.startup_at >= 1.0:
+                    self.startup_phase, self.startup_at = 'restart_high', now
+                elif self.startup_phase == 'restart_high' and now-self.startup_at >= 0.1:
+                    self.startup_phase = None
+                    self.pid.last = None
+                    self._update_pid_duty(self.state['filtered'])
+                if self.startup_phase is not None:
+                    duty = 0 if self.startup_phase == 'low' else 100
+                    self.state['duty'] = duty
+                    self.hw.set_duty(duty)
+                    return duty
             duty = self.state['duty']
             self.hw.set_duty(100 if self.c['burst'] and duty else duty)
             return duty
@@ -266,7 +297,7 @@ class Heater:
                         self.sensor_error(f'MLX90614 read failed: {exc}')
                 duty = self.output()
                 remaining = max(0, self.c['cycle_s']-(self.clock()-start))
-                if self.c['burst']:
+                if self.c['burst'] and self.startup_phase is None:
                     self.quit.wait(remaining*duty/100)
                     with self.lock:
                         self.hw.set_duty(0)

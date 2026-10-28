@@ -4,6 +4,7 @@ const token = document.querySelector('meta[name="panel-token"]').content;
 let state = null, online = false, lightWanted = false, toastTimer;
 let page = 0, photos = [], total = 0, selected = 0, selectedAssay = null;
 let assayRecords = [], lastTrash = null, archiveEpoch = 0, searchTimer;
+let archiveSignature = null, archiveSyncing = false, clearingLogs = false;
 const number = (v, d = 1) => v == null ? '—' : Number(v).toFixed(d);
 const duration = seconds => {
   const s = Math.max(0, Math.ceil(seconds));
@@ -108,7 +109,22 @@ async function status() {
     errorBox('heater-error', 'Connection lost. Active heating or assay jobs may still be running.');
   }
 }
-async function poll() { await status(); setTimeout(poll, state?.power?.mode === 'asleep' ? 5000 : 1500); }
+async function syncArchive() {
+  if (!online || document.hidden || archiveSyncing || $('photo-dialog').open) return;
+  const signature = JSON.stringify([state.camera.latest, state.assay.active?.id, state.assay.last?.id, state.assay.last?.status, state.heater.log]);
+  if (signature === archiveSignature) return;
+  archiveSyncing = true;
+  try {
+    if (!await refreshCatalog()) return;
+    if (!$('gallery').hidden) {
+      folderView();
+      if (selectedAssay) await loadGallery(); else renderFolders();
+    }
+    if (!$('logs').hidden) await loadLogs();
+    archiveSignature = signature;
+  } finally { archiveSyncing = false; }
+}
+async function poll() { await status(); await syncArchive(); setTimeout(poll, state?.power?.mode === 'asleep' ? 5000 : 1500); }
 async function preview() {
   if (state?.power?.mode === 'awake' && !document.hidden && !$('live').hidden) {
     try {
@@ -199,6 +215,7 @@ async function refreshCatalog() {
     options('log-operator', operators, 'All operators');
     $('operator-names').replaceChildren(...data.operators.map(name => new Option(name, name)));
     updateLogOptions();
+    return true;
   } catch (error) { notify(error.message); }
 }
 function updateLogOptions() {
@@ -223,6 +240,8 @@ function folderView() {
   const record = assayRecords.find(r => r.id === selectedAssay);
   $('folder-filters').hidden = $('folder-grid').hidden = !!selectedAssay;
   $('photo-browser').hidden = !selectedAssay;
+  $('folder-navigation').hidden = !selectedAssay;
+  $('folder-breadcrumb').textContent = record?.name || '';
   $('gallery-title').textContent = record ? record.name : 'Assay folders';
   $('gallery-description').textContent = record ? `${record.operator || 'Independent instrument use'}${record.started_at ? ' · ' + localDate(record.started_at) : ''}` : 'Find your experiments by operator or assay name.';
   if (record) {
@@ -316,6 +335,18 @@ async function loadLogs() {
   } catch (error) { notify(error.message); }
 }
 $('refresh-logs').onclick = async () => { await refreshCatalog(); await loadLogs(); };
+$('clear-logs').onclick = async () => {
+  if (clearingLogs) return;
+  clearingLogs = true;
+  $('clear-logs').disabled = true;
+  try {
+    const result = await api('archive/clear-logs', {});
+    if (result.trash_id) { lastTrash = result.trash_id; $('undo-bar').hidden = false; }
+    notify(result.count ? `Cleared ${result.count} temperature logs. Use Undo deletion to restore.` : 'No temperature logs to clear.');
+    await refreshCatalog(); await loadLogs();
+  } catch (error) { notify(error.message); }
+  finally { clearingLogs = false; $('clear-logs').disabled = false; }
+};
 $('log-operator').onchange = () => { updateLogOptions(); loadLogs(); };
 $('log-assay').onchange = loadLogs;
 function drawChart(points){const cv=$('chart'),box=cv.getBoundingClientRect();if(!box.width)return;const dpr=window.devicePixelRatio||1;cv.width=box.width*dpr;cv.height=box.height*dpr;const ctx=cv.getContext('2d');ctx.scale(dpr,dpr);const w=box.width,h=box.height,left=30,top=10,bottom=h-25;points=points.filter(p=>p.t>Date.now()/1000-600);const values=points.flatMap(p=>[p.temperature,...(p.target!=null?[p.target]:[])]);const low=values.length?Math.floor(Math.min(...values)/10)*10:0,high=values.length?Math.max(low+10,Math.ceil(Math.max(...values)/10)*10):100;const y=v=>bottom-(v-low)/(high-low)*(bottom-top);ctx.font='9px sans-serif';ctx.fillStyle='#94a091';for(let i=0;i<=3;i++){const v=low+(high-low)*i/3;ctx.strokeStyle='#edf0e9';ctx.beginPath();ctx.moveTo(left,y(v));ctx.lineTo(w,y(v));ctx.stroke();ctx.fillText(Math.round(v),0,y(v)+3);}if(!points.length){ctx.fillStyle='#9aa597';ctx.textAlign='center';ctx.fillText('Waiting for valid temperature readings',w/2,h/2);return;}const end=Date.now()/1000;const x=t=>left+(t-(end-600))/600*(w-left);ctx.strokeStyle='#c4b48b';ctx.setLineDash([4,4]);ctx.beginPath();let started=false;for(const p of points){if(p.target!=null){if(!started)ctx.moveTo(x(p.t),y(p.target));else ctx.lineTo(x(p.t),y(p.target));started=true;}}ctx.stroke();ctx.setLineDash([]);ctx.strokeStyle='#4f8a67';ctx.lineWidth=1.8;ctx.beginPath();points.forEach((p,i)=>i?ctx.lineTo(x(p.t),y(p.temperature)):ctx.moveTo(x(p.t),y(p.temperature)));ctx.stroke();}

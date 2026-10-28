@@ -62,13 +62,14 @@
       <div class="footnote"><span>● Heating and excitation light stay off after startup or restart</span><span>Photos include timestamps, camera settings, and temperature records</span></div>
     </section>
     <section id="gallery" class="tab-view" hidden>
+      <div id="folder-navigation" class="folder-navigation" hidden><button id="back-folders" class="folder-back">← Back to assay folders</button><span>Photo archive / <strong id="folder-breadcrumb"></strong></span></div>
       <div class="section-head"><div><span class="eyebrow">OBSERVATION ARCHIVE</span><h2 id="gallery-title">Assay folders</h2><p id="gallery-description">Find your experiments by operator or assay name.</p></div><button id="refresh-gallery" class="secondary">Refresh</button></div>
       <div id="folder-filters" class="archive-filters"><label>Operator<select id="archive-operator"><option value="">All operators</option></select></label><label>Find an assay<input id="assay-search" type="search" placeholder="Assay name or operator"></label></div>
       <div id="export-status" role="status" class="folder-summary" hidden></div>
       <a id="export-download" hidden>Download ready ZIP ↓</a>
       <div id="folder-grid" class="folder-grid"></div>
       <div id="photo-browser" hidden>
-        <div class="archive-filters"><button id="back-folders" class="secondary">← All assay folders</button><label>Capture date (UTC)<input id="filter-date" type="date"></label><button id="folder-logs" class="secondary">View temperature logs</button><button id="delete-assay" class="danger">Delete assay folder</button></div>
+        <div class="archive-filters"><label>Capture date (UTC)<input id="filter-date" type="date"></label><button id="folder-logs" class="secondary">View temperature logs</button><button id="delete-assay" class="danger">Delete assay folder</button></div>
         <div id="folder-summary" class="folder-summary"></div>
         <div class="export-controls">
           <button id="download-folder" class="secondary">Download all photos (ZIP)</button>
@@ -82,7 +83,8 @@
         <div id="gallery-grid"></div><div class="pagination"><button id="prev-page" class="secondary">← Previous page</button><span id="page-info">Page 1</span><button id="next-page" class="secondary">Next page →</button></div>
       </div>
     </section>
-    <section id="logs" class="tab-view" hidden><div class="section-head"><div><span class="eyebrow">EXPERIMENT RECORDS</span><h2>Temperature logs</h2><p>Download or delete logs associated with each assay. Independent runs are under Unassigned.</p></div><button id="refresh-logs" class="secondary">Refresh</button></div>
+    <section id="logs" class="tab-view" hidden><div class="section-head"><div><span class="eyebrow">EXPERIMENT RECORDS</span><h2>Temperature logs</h2><p>Download or delete logs associated with each assay. Independent runs are under Unassigned.</p></div><div class="log-toolbar"><button id="refresh-logs" class="secondary">Refresh</button><button id="clear-logs" class="danger">Clear all temperature logs</button></div></div>
+      <p class="hint">Clear all removes logs from every assay and Unassigned, regardless of filters. You can undo this action. Stop acquisition and heating first.</p>
       <div class="archive-filters"><label>Operator<select id="log-operator"><option value="">All operators</option></select></label><label>Assay<select id="log-assay"><option value="">All assays</option></select></label></div><div id="log-list"></div>
     </section>
   </main>

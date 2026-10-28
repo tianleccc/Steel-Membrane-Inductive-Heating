@@ -109,6 +109,17 @@ class Archive:
                 if name.endswith('.thumb.jpg'):
                     raise ValueError('Delete the original photo, not its thumbnail')
                 paths += [p for p in (path.with_suffix('.thumb.jpg'),path.with_suffix('.json')) if p.exists()]
+        return self.move_to_trash(paths, assay_id, kind)
+
+    def delete_logs(self, records):
+        paths = [self.file(record['id'], 'logs', path.name)
+                 for record in records
+                 for path in (self.folder(record['id'])/'logs').glob('heat_*.csv')]
+        if not paths:
+            return None, 0
+        return self.move_to_trash(paths, None, 'all_logs'), len(paths)
+
+    def move_to_trash(self, paths, assay_id, kind):
         if any(p.is_symlink() for p in paths):
             raise ValueError('Symbolic links cannot be deleted through the archive')
         trash_id = uuid.uuid4().hex

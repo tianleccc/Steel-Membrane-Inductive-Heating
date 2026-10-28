@@ -277,6 +277,17 @@ def create_app(config=None, heater=None, camera=None):
             trash_id=archive.delete(assay_id,data.get('kind'),data.get('name'))
         return jsonify(ok=True,trash_id=trash_id)
 
+    @app.post('/api/archive/clear-logs')
+    def clear_logs():
+        with assays.lock:
+            records = archive.summaries()
+            # Validate every folder before moving any logs.
+            for record in records:
+                assays.assert_deletable(record['id'])
+                exports.protect(record['id'])
+            trash_id, count = archive.delete_logs(records)
+        return jsonify(ok=True, trash_id=trash_id, count=count)
+
     @app.post('/api/archive/restore')
     def restore():
         with assays.lock:

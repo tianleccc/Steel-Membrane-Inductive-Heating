@@ -169,6 +169,37 @@ class AssayTests(unittest.TestCase):
             self.assertEqual(self.post('archive/delete',dict(kind='assay',assay_id=assay_id)).status_code,400)
         with self.assertRaises(ValueError): self.manager.archive.file('unassigned','logs','../config.json')
 
+    def test_clear_all_logs_and_undo_preserve_photos(self):
+        record=self.start(); self.post('assays/stop')
+        photo=self.photo(record['id'])
+        manual=self.manager.archive.folder()/'logs'/'heat_20261007T120000_000001Z.csv'
+        manual.write_text('temperature\n25\n')
+        result=self.post('archive/clear-logs')
+        self.assertEqual(result.status_code,200,result.text)
+        self.assertEqual(result.json['count'],2)
+        self.assertFalse(self.client.get('/api/logs').json['items'])
+        self.assertTrue(photo.exists())
+        self.assertTrue((photo.parent.parent/'assay.json').exists())
+        self.assertEqual(self.post('archive/restore',dict(trash_id=result.json['trash_id'])).status_code,200)
+        self.assertEqual(len(self.client.get('/api/logs').json['items']),2)
+        self.assertEqual(manual.read_text(),'temperature\n25\n')
+
+    def test_clear_logs_checks_all_folders_before_deleting(self):
+        self.start(); self.post('assays/stop')
+        self.start()
+        self.assertEqual(self.post('archive/clear-logs').status_code,400)
+        self.assertEqual(len(self.client.get('/api/logs').json['items']),2)
+        self.post('assays/stop')
+        with patch.object(self.app.extensions['exports'],'protect',side_effect=ValueError('Export running')):
+            self.assertEqual(self.post('archive/clear-logs').status_code,400)
+        self.assertEqual(len(self.client.get('/api/logs').json['items']),2)
+
+    def test_clear_logs_empty_and_token_required(self):
+        self.assertEqual(self.client.post('/api/archive/clear-logs',json={}).status_code,403)
+        result=self.post('archive/clear-logs')
+        self.assertEqual(result.json['count'],0)
+        self.assertIsNone(result.json['trash_id'])
+
     def test_restart_marks_unfinished_assay_interrupted(self):
         record=self.start()
         self.heater.stop(); self.camera.stop()

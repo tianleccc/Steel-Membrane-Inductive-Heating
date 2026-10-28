@@ -138,6 +138,7 @@ def series(rows, session_id=None):
     if session_id and session_id not in sessions:
         raise ValueError('Reaction run not found in this folder')
     points = [dict(photo=row['Image'], utc=row['UTC'], time_min=row['Time_min'],
+                   raw=[row[f'Raw_Region_{i}'] for i in range(1,5)],
                    corrected=[row[f'Corrected_Region_{i}'] for i in range(1,5)])
               for row in rows if row['Reaction_ID'] == chosen]
     return dict(sessions=list(reversed(list(sessions.values()))), session_id=chosen, points=points)

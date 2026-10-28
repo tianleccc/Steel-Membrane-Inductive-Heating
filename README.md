@@ -245,8 +245,10 @@ independent copies and are not cleared by the panel.
 ## Real-time reaction measurements
 
 Every new saved photo is analyzed at full JPEG resolution, including independent
-captures and assays. **Workspace → Reaction curves** shows only corrected values
-for Region 1–4. **Check reaction area**, below the excitation-light control, shows
+captures and assays. **Workspace → Reaction curves** shows only the current
+acquisition's corrected values for Region 1–4, with no history selectors or
+downloads. After a service restart it waits for a new acquisition rather than
+loading a saved run. **Check reaction area**, below the excitation-light control, shows
 the same four labeled, colored circles over the live preview without changing
 the original image or switching on the light. Enable excitation separately when
 checking fluorescence. Coordinates are in `panel/reaction_regions.json`, fitted
@@ -264,15 +266,18 @@ correction, not subtraction of a separate spatial background region.
 Each assay or timed acquisition gets an independent baseline and reaction ID;
 a single manual capture is its own one-point run. Time is measured from the
 first photo using the actual monotonic capture clock, not an assumed interval.
-The first corrected value is zero. Choose a photo folder and acquisition run
-to review saved curves, or leave **Follow current run** enabled. Old photos are
+The first corrected value is zero. Open the corresponding **Photo archive**
+folder and click the green **View amplification curve** button to scroll to
+the two charts below the photos: raw and background-corrected fluorescence.
+Choose an acquisition run there if the folder contains multiple runs.
+**Download folder CSV** exports all recorded runs in that folder. Old photos are
 not retroactively analyzed. Auto exposure and white balance remain unchanged;
 these are relative fluorescence measurements in arbitrary units.
 
 Each original JPEG has a matching `.reaction.csv` containing its raw, smoothed,
 background and corrected values, photo filename, timestamp, reaction ID, ROI
 coordinates and algorithm settings. These immutable rows survive restarts and
-are combined by **Download reaction CSV** or photo ZIP/USB export. Reaction
+are combined by **Download folder CSV** or photo ZIP/USB export. Reaction
 records have no independent delete endpoint: deleting/restoring a photo moves
 its CSV together, and deleting/restoring an assay moves the entire folder.
 Clearing temperature logs never removes reaction data. Deleting an earlier

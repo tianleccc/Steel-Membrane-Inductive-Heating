@@ -275,6 +275,26 @@ def create_app(config=None, heater=None, camera=None):
             rows = read_rows(archive.folder(assay_id))
         return jsonify(assay_id=assay_id, **series(rows, request.args.get('session_id') or None))
 
+    @app.get('/api/reaction/current')
+    def current_reaction():
+        with assays.lock:
+            snapshot = camera.snapshot()
+            session_id = snapshot.get('reaction_id')
+            assay_id = snapshot.get('assay_id') or 'unassigned'
+            # Never fall back to a previous saved run when the service has no
+            # current acquisition, including after restart.
+            folder = None
+            if session_id:
+                try:
+                    folder = archive.folder(assay_id)
+                except ValueError:
+                    pass  # The completed current assay may have been deleted.
+            rows = [row for row in read_rows(folder)
+                    if row['Reaction_ID'] == session_id] if folder else []
+            data = series(rows)
+        return jsonify(assay_id=assay_id, session_id=session_id, points=data['points'],
+                       acquiring=bool(snapshot['running'] or snapshot['busy'] or snapshot.get('pending')))
+
     @app.get('/reaction.csv')
     def reaction_download():
         import io

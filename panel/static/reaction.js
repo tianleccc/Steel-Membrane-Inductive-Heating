@@ -1,6 +1,7 @@
 'use strict';
 let reactionRegions = null, reactionPoints = [], reactionKey = null, reactionBusy = false;
-let reactionFolder = 'unassigned', reactionGeneration = 0, reactionCatalog = '';
+let liveReactionSession = null;
+let archiveReactionFolder = null, archiveReactionPoints = [], archiveReactionKey = null, archiveReactionBusy = false;
 
 function reactionSvg(tag, attributes, text) {
   const node = document.createElementNS('http://www.w3.org/2000/svg', tag);
@@ -13,7 +14,8 @@ async function loadReactionRegions() {
     reactionRegions = await api('reaction/regions');
     const svg = $('reaction-overlay');
     svg.setAttribute('viewBox', `0 0 ${reactionRegions.image_size.join(' ')}`);
-    svg.replaceChildren(); $('reaction-legend').replaceChildren();
+    svg.replaceChildren();
+    for (const id of ['reaction-legend', 'archive-reaction-legend']) $(id).replaceChildren();
     for (const region of reactionRegions.coordinates) {
       const [x, y] = region.center, r = region.radius;
       svg.append(reactionSvg('circle', {cx:x, cy:y, r, fill:'none', stroke:region.color, 'stroke-width':12}));
@@ -22,9 +24,11 @@ async function loadReactionRegions() {
       svg.append(reactionSvg('text', {x:x+dx, y:y+dy, fill:region.color,
         stroke:'#06140f', 'stroke-width':12, 'paint-order':'stroke', 'font-size':80,
         'font-weight':700, 'text-anchor':region.id === 2 ? 'start' : region.id === 4 ? 'end' : 'middle'}, `Region ${region.id}`));
-      const label = element('span', `Region ${region.id}`);
-      label.style.setProperty('--region-color', region.color);
-      $('reaction-legend').append(label);
+      for (const id of ['reaction-legend', 'archive-reaction-legend']) {
+        const label = element('span', `Region ${region.id}`);
+        label.style.setProperty('--region-color', region.color);
+        $(id).append(label);
+      }
     }
     drawReactionChart(); updateReactionOverlay();
   } catch (error) { errorBox('reaction-error', error.message); }
@@ -36,86 +40,92 @@ $('check-reaction-area').onchange = updateReactionOverlay;
 $('preview').addEventListener('load', updateReactionOverlay);
 setInterval(updateReactionOverlay, 500);
 
-function resetReactionView() {
-  reactionGeneration++; reactionKey = null; reactionPoints = [];
-  $('reaction-download').hidden = true;
-  badge('reaction-status', 'Loading');
-  $('reaction-detail').textContent = 'Loading reaction measurements…';
+function syncReactionFolder() {
+  if (archiveReactionFolder === selectedAssay) return;
+  archiveReactionFolder = selectedAssay; archiveReactionPoints = []; archiveReactionKey = null;
+  $('archive-reaction-session').replaceChildren(new Option('Latest run', ''));
+  $('archive-reaction-download').hidden = true;
+  $('archive-reaction-folder').textContent = assayRecords.find(r => r.id === selectedAssay)?.name || '';
+  $('archive-reaction-detail').textContent = 'Loading saved reaction data…';
+  badge('archive-reaction-status', 'Loading'); errorBox('archive-reaction-error', null);
   drawReactionChart();
 }
-function chooseReactionFolder(id, follow = false) {
-  reactionFolder = id; $('reaction-assay').value = id;
-  $('reaction-follow').checked = follow;
-  $('reaction-session').replaceChildren(new Option('Latest run', ''));
-  resetReactionView(); pollReaction(false);
-}
-$('reaction-assay').onchange = () => chooseReactionFolder($('reaction-assay').value);
-$('reaction-session').onchange = () => {
-  $('reaction-follow').checked = false; resetReactionView(); pollReaction(false);
+$('view-amplification').onclick = () => {
+  syncReactionFolder(); loadArchiveReaction();
+  $('archive-reaction-card').scrollIntoView({behavior:'smooth', block:'start'});
 };
-$('reaction-follow').onchange = () => {
-  $('reaction-session').value = ''; resetReactionView(); pollReaction(false);
-};
-$('folder-reaction').onclick = () => {
-  showTab('live'); chooseReactionFolder(selectedAssay);
-  $('reaction-card').scrollIntoView({behavior:'smooth', block:'start'});
+$('archive-reaction-session').onchange = () => {
+  archiveReactionKey = null; archiveReactionPoints = []; drawReactionChart(); loadArchiveReaction();
 };
 
-async function pollReaction(schedule = true) {
-  let acquired = false;
-  try {
-    if (document.hidden || $('live').hidden || reactionBusy) return;
-    const catalog = JSON.stringify(assayRecords.map(r => [r.id,r.name,r.operator]));
-    if (catalog !== reactionCatalog && assayRecords.length) {
-      $('reaction-assay').replaceChildren(...assayRecords.map(r => new Option(`${r.name}${r.operator ? ' · '+r.operator : ''}`, r.id)));
-      if (!assayRecords.some(r => r.id === reactionFolder)) { reactionFolder = 'unassigned'; resetReactionView(); }
-      $('reaction-assay').value = reactionFolder; reactionCatalog = catalog;
-    }
-    const follow = $('reaction-follow').checked;
-    const activeFolder = state?.assay.active?.id || state?.camera.assay_id || 'unassigned';
-    if (follow && reactionFolder !== activeFolder) {
-      reactionFolder = activeFolder; $('reaction-assay').value = activeFolder;
-      $('reaction-session').value = ''; resetReactionView();
-    }
-    const session = $('reaction-session').value;
-    const key = JSON.stringify([reactionFolder, session, follow, state?.camera.latest, state?.camera.reaction_id, archiveEpoch]);
-    if (key === reactionKey) return;
-    reactionBusy = true;
-    acquired = true;
-    const generation = reactionGeneration, folder = reactionFolder;
-    const data = await api(`reaction?assay_id=${encodeURIComponent(folder)}${session ? '&session_id='+encodeURIComponent(session) : ''}`);
-    if (generation !== reactionGeneration) return;
-    $('reaction-session').replaceChildren(new Option('Latest run', ''), ...data.sessions.map(s => new Option(`${localDate(s.utc)} · ${s.count} photos`, s.id)));
-    $('reaction-session').value = session;
-    const pending = follow && state?.camera.reaction_id && state.camera.reaction_id !== data.session_id;
-    reactionPoints = pending ? [] : data.points;
-    const count = reactionPoints.length;
-    badge('reaction-status', count ? `${count} photos analyzed` : 'Waiting for photos', count ? 'ok' : '');
-    $('reaction-detail').textContent = count ? `${$('reaction-assay').selectedOptions[0]?.textContent || folder} · ${localDate(reactionPoints[0].utc)} · Latest ${number(reactionPoints[count-1].time_min,2)} min` : 'Start an assay or timed acquisition to record a new curve. Earlier photos without reaction logs are not analyzed retroactively.';
-    $('reaction-download').hidden = !count;
-    if (count) $('reaction-download').href = `/reaction.csv?assay_id=${encodeURIComponent(folder)}&session_id=${encodeURIComponent(data.session_id)}`;
-    errorBox('reaction-error', null); reactionKey = key; drawReactionChart();
-  } catch (error) {
-    badge('reaction-status', 'Could not update', 'error'); errorBox('reaction-error', error.message);
-  } finally {
-    if (acquired) reactionBusy = false;
-    if (schedule) setTimeout(pollReaction, 2000);
+async function loadCurrentReaction() {
+  if ($('live').hidden || reactionBusy) return;
+  const session = state?.camera.reaction_id || null;
+  if (session !== liveReactionSession) {
+    liveReactionSession = session; reactionPoints = []; reactionKey = null; drawReactionChart();
   }
+  const key = JSON.stringify([session, state?.camera.latest, state?.camera.running, state?.camera.busy, archiveEpoch]);
+  if (key === reactionKey) return;
+  reactionBusy = true;
+  try {
+    const data = await api('reaction/current');
+    if (session !== (state?.camera.reaction_id || null)) return;
+    reactionPoints = data.points;
+    const count = reactionPoints.length;
+    badge('reaction-status', count ? `${data.acquiring ? 'Live' : 'Current run'} · ${count} photos` : 'Waiting for current acquisition', count ? 'ok' : '');
+    $('reaction-detail').textContent = count ? `${assayRecords.find(r => r.id === data.assay_id)?.name || 'Unassigned'} · Current acquisition · ${localDate(reactionPoints[0].utc)} · Latest ${number(reactionPoints[count-1].time_min,2)} min` : 'Start an assay or timed acquisition. Saved runs are available inside their Photo archive folders.';
+    errorBox('reaction-error', null); reactionKey = key; drawReactionChart();
+  } catch (error) { errorBox('reaction-error', error.message); }
+  finally { reactionBusy = false; }
+}
+
+async function loadArchiveReaction() {
+  syncReactionFolder();
+  if ($('gallery').hidden || !selectedAssay || archiveReactionBusy) return;
+  const folder = selectedAssay, session = $('archive-reaction-session').value;
+  const key = JSON.stringify([folder, session, state?.camera.latest, archiveEpoch]);
+  if (key === archiveReactionKey) return;
+  archiveReactionBusy = true;
+  try {
+    const data = await api(`reaction?assay_id=${encodeURIComponent(folder)}${session ? '&session_id='+encodeURIComponent(session) : ''}`);
+    if (folder !== selectedAssay || session !== $('archive-reaction-session').value) return;
+    $('archive-reaction-session').replaceChildren(new Option('Latest run', ''), ...data.sessions.map(s => new Option(`${localDate(s.utc)} · ${s.count} photos`, s.id)));
+    $('archive-reaction-session').value = session;
+    archiveReactionPoints = data.points;
+    const count = data.points.length;
+    badge('archive-reaction-status', count ? `${count} photos · Selected run` : 'No recorded reaction data', count ? 'ok' : '');
+    $('archive-reaction-detail').textContent = count ? `${localDate(data.points[0].utc)} · ${number(data.points[count-1].time_min,2)} min · Region colors match the preview.` : 'This folder has no recorded reaction measurements. Earlier photos are not analyzed retroactively.';
+    $('archive-reaction-download').hidden = !data.sessions.length;
+    $('archive-reaction-download').href = `/reaction.csv?assay_id=${encodeURIComponent(folder)}`;
+    errorBox('archive-reaction-error', null); archiveReactionKey = key; drawReactionChart();
+  } catch (error) {
+    if (folder === selectedAssay) errorBox('archive-reaction-error', error.message);
+  } finally { archiveReactionBusy = false; }
+}
+async function pollReaction() {
+  try {
+    if (!document.hidden) { await loadCurrentReaction(); await loadArchiveReaction(); }
+  } finally { setTimeout(pollReaction, 2000); }
 }
 
 function drawReactionChart() {
-  const canvas = $('reaction-chart'), bounds = canvas.getBoundingClientRect();
+  drawFluorescenceChart('reaction-chart', reactionPoints, 'corrected');
+  drawFluorescenceChart('archive-raw-chart', archiveReactionPoints, 'raw');
+  drawFluorescenceChart('archive-corrected-chart', archiveReactionPoints, 'corrected');
+}
+function drawFluorescenceChart(id, points, field) {
+  const canvas = $(id), bounds = canvas.getBoundingClientRect();
   if (!bounds.width) return;
   const dpr = window.devicePixelRatio || 1, w = bounds.width, h = bounds.height;
   canvas.width = w*dpr; canvas.height = h*dpr;
   const ctx = canvas.getContext('2d'); ctx.scale(dpr,dpr);
   const left = w < 500 ? 64 : 80, right = w-18, top = 30, bottom = h-48;
-  const end = reactionPoints.reduce((end,p) => Math.max(end,p.time_min),1);
+  const end = points.reduce((end,p) => Math.max(end,p.time_min),1);
   let peak = 1;
-  for (const point of reactionPoints) for (const value of point.corrected) peak = Math.max(peak,value);
+  for (const point of points) for (const value of point[field]) peak = Math.max(peak,value);
   const high = peak*1.1, x = v => left+v/end*(right-left), y = v => bottom-v/high*(bottom-top);
   ctx.font = '11px sans-serif'; ctx.fillStyle = '#637468';
-  ctx.fillText('Corrected fluorescence (a.u.)', left, 15);
+  ctx.fillText(`${field === 'raw' ? 'Raw' : 'Corrected'} fluorescence (a.u.)`, left, 15);
   for (let i=0; i<=4; i++) {
     const value = high*i/4;
     ctx.strokeStyle = '#e8ede7'; ctx.beginPath(); ctx.moveTo(left,y(value)); ctx.lineTo(right,y(value)); ctx.stroke();
@@ -124,14 +134,15 @@ function drawReactionChart() {
     ctx.textAlign = 'center'; ctx.fillText((end*i/4).toFixed(1), x(end*i/4), bottom+20);
   }
   ctx.fillText('Time since first photo (min)', (left+right)/2,h-6);
-  if (!reactionPoints.length) {
-    ctx.fillText('Waiting for saved reaction photos', (left+right)/2,(top+bottom)/2); return;
+  if (!points.length) {
+    ctx.fillText(id === 'reaction-chart' ? 'Waiting for current acquisition' : 'No recorded reaction data', (left+right)/2,(top+bottom)/2); return;
   }
   (reactionRegions?.coordinates || []).forEach((region,i) => {
     ctx.strokeStyle = ctx.fillStyle = region.color; ctx.lineWidth = 2;
-    ctx.beginPath(); reactionPoints.forEach((p,j) => j ? ctx.lineTo(x(p.time_min),y(p.corrected[i])) : ctx.moveTo(x(p.time_min),y(p.corrected[i]))); ctx.stroke();
-    const point = reactionPoints[reactionPoints.length-1]; ctx.beginPath(); ctx.arc(x(point.time_min),y(point.corrected[i]),3,0,2*Math.PI); ctx.fill();
+    ctx.beginPath(); points.forEach((p,j) => j ? ctx.lineTo(x(p.time_min),y(p[field][i])) : ctx.moveTo(x(p.time_min),y(p[field][i]))); ctx.stroke();
+    const point = points[points.length-1]; ctx.beginPath(); ctx.arc(x(point.time_min),y(point[field][i]),3,0,2*Math.PI); ctx.fill();
   });
 }
-new ResizeObserver(drawReactionChart).observe($('reaction-chart'));
+const reactionResize = new ResizeObserver(drawReactionChart);
+for (const id of ['reaction-chart','archive-raw-chart','archive-corrected-chart']) reactionResize.observe($(id));
 loadReactionRegions(); pollReaction();

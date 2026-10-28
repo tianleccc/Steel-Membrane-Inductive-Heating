@@ -130,6 +130,19 @@ class ReactionArchiveTests(unittest.TestCase):
         self.assertEqual(self.client.get('/api/reaction?assay_id=../bad').status_code,400)
         self.assertEqual(len(self.client.get('/api/reaction/regions').json['coordinates']),4)
 
+    def test_workspace_only_reads_current_session_never_latest_history(self):
+        _,_,row=self.measurement()
+        self.assertEqual(self.client.get('/api/reaction/current').json['points'],[])
+        history=self.client.get('/api/reaction').json['points']
+        self.assertEqual(len(history),1)
+        self.assertEqual(history[0]['raw'],[row[f'Raw_Region_{i}'] for i in range(1,5)])
+        self.camera.state['reaction_id']=row['Reaction_ID']
+        self.assertEqual(len(self.client.get('/api/reaction/current').json['points']),1)
+        self.camera.state['reaction_id']='new-run-with-no-photos'
+        self.assertEqual(self.client.get('/api/reaction/current').json['points'],[])
+        self.camera.state.update(reaction_id=None,assay_id=None)
+        self.assertEqual(self.client.get('/api/reaction/current').json['points'],[])
+
     def test_missing_analyzer_blocks_assay_before_heating(self):
         payload=dict(name='preflight',operator='test',duration_minutes=1,target=40,interval=30,pid={'kp':8,'ki':.05,'kd':.1})
         with patch.object(self.camera,'validate_reaction',side_effect=ValueError('Missing analyzer')):

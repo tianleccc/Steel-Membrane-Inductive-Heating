@@ -240,6 +240,8 @@ function folderView() {
   const record = assayRecords.find(r => r.id === selectedAssay);
   $('folder-filters').hidden = $('folder-grid').hidden = !!selectedAssay;
   $('photo-browser').hidden = !selectedAssay;
+  $('view-amplification').hidden = !selectedAssay;
+  if (typeof syncReactionFolder === 'function') syncReactionFolder();
   $('folder-navigation').hidden = !selectedAssay;
   $('folder-breadcrumb').textContent = record?.name || '';
   $('gallery-title').textContent = record ? record.name : 'Assay folders';
@@ -300,7 +302,6 @@ $('prev-page').onclick = () => { page--; loadGallery(); };
 $('next-page').onclick = () => { page++; loadGallery(); };
 $('filter-date').onchange = () => { page = 0; loadGallery(); };
 $('back-folders').onclick = () => { selectedAssay = null; archiveEpoch++; refreshGallery(); };
-$('refresh-gallery').onclick = refreshGallery;
 $('archive-operator').onchange = renderFolders;
 $('assay-search').oninput = () => { clearTimeout(searchTimer); searchTimer = setTimeout(renderFolders, 150); };
 $('folder-logs').onclick = async () => { showTab('logs'); await refreshCatalog(); $('log-operator').value = ''; updateLogOptions(); $('log-assay').value = selectedAssay; await loadLogs(); };

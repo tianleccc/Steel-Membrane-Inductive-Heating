@@ -4,7 +4,7 @@
   <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
   <meta name="panel-token" content="{{ token }}">
   <title>Steel Membrane · Instrument Panel</title>
-  <link rel="stylesheet" href="/static/style.css?v=reaction-1">
+  <link rel="stylesheet" href="/static/style.css?v=reaction-2">
 </head>
 <body>
   <header><a class="brand" href="/"><span class="mark">S<span>M</span></span><span>STEEL MEMBRANE<small>Imaging & induction heating</small></span></a><div class="header-right"><span id="connection" class="pill">Connecting</span><button id="stop-all" class="danger">■ Stop all</button></div></header>
@@ -62,18 +62,17 @@
       </div>
       <article id="reaction-card" class="card reaction-card">
         <div class="card-head"><div><span class="eyebrow">03 / REAL-TIME AMPLIFICATION</span><h2>Reaction curves</h2><p>Background-corrected fluorescence · One measurement per saved photo</p></div><span id="reaction-status" class="pill">Waiting for photos</span></div>
-        <div class="reaction-controls"><label>Photo folder<select id="reaction-assay"><option value="unassigned">Unassigned</option></select></label><label>Acquisition run<select id="reaction-session"><option value="">Latest run</option></select></label><label class="toggle"><input id="reaction-follow" type="checkbox" checked><span>Follow current run</span></label><a id="reaction-download" class="primary" hidden>Download reaction CSV ↓</a></div>
         <div id="reaction-legend" class="reaction-legend"></div>
         <div class="reaction-chart-wrap"><canvas id="reaction-chart" role="img" aria-label="Background-corrected fluorescence for Region 1 to Region 4 versus elapsed minutes"></canvas></div>
         <p id="reaction-detail">Start an assay or timed acquisition to record a new reaction curve.</p>
-        <p class="hint">CSV includes raw, smoothed, background and corrected values linked to each photo. Each acquisition starts a fresh baseline. Reaction records stay with their photos and are included in photo exports.</p>
+        <p class="hint">Current acquisition only · Each new run starts a fresh baseline. Open its Photo archive folder to view saved raw and corrected curves or download CSV.</p>
         <div id="reaction-error" class="inline-error" hidden></div>
       </article>
       <div class="footnote"><span>● Heating and excitation light stay off after startup or restart</span><span>Photos include timestamps, camera settings, and temperature records</span></div>
     </section>
     <section id="gallery" class="tab-view" hidden>
       <div id="folder-navigation" class="folder-navigation" hidden><button id="back-folders" class="folder-back">← Back to assay folders</button><span>Photo archive / <strong id="folder-breadcrumb"></strong></span></div>
-      <div class="section-head"><div><span class="eyebrow">OBSERVATION ARCHIVE</span><h2 id="gallery-title">Assay folders</h2><p id="gallery-description">Find your experiments by operator or assay name.</p></div><button id="refresh-gallery" class="secondary">Refresh</button></div>
+      <div class="section-head"><div><span class="eyebrow">OBSERVATION ARCHIVE</span><h2 id="gallery-title">Assay folders</h2><p id="gallery-description">Find your experiments by operator or assay name.</p></div><button id="view-amplification" class="amplification-button" hidden>View amplification curve ↓</button></div>
       <div id="folder-filters" class="archive-filters"><label>Operator<select id="archive-operator"><option value="">All operators</option></select></label><label>Find an assay<input id="assay-search" type="search" placeholder="Assay name or operator"></label></div>
       <div id="export-status" role="status" class="folder-summary" hidden></div>
       <a id="export-download" hidden>Download ready ZIP ↓</a>
@@ -83,7 +82,6 @@
         <div id="folder-summary" class="folder-summary"></div>
         <div class="export-controls">
           <button id="download-folder" class="secondary">Download all photos (ZIP)</button>
-          <button id="folder-reaction" class="secondary">View reaction curves</button>
           <label>USB drive on this Raspberry Pi<select id="usb-drive"><option value="">Select a USB drive</option></select></label>
           <button id="refresh-usb" class="secondary">Refresh USB drives</button>
           <button id="export-usb" class="secondary">Export assay to USB</button>
@@ -92,6 +90,18 @@
         <p class="hint">ZIP and USB exports include all original photos and their reaction log, regardless of the date filter. The CSV maps each measurement to its exported image. Finish or stop the assay before exporting.</p>
         <p id="usb-note" class="hint"></p>
         <div id="gallery-grid"></div><div class="pagination"><button id="prev-page" class="secondary">← Previous page</button><span id="page-info">Page 1</span><button id="next-page" class="secondary">Next page →</button></div>
+        <article id="archive-reaction-card" class="card reaction-card">
+          <div class="card-head"><div><span class="eyebrow">SAVED REACTION DATA</span><h2>Amplification curves</h2><p id="archive-reaction-folder"></p></div><span id="archive-reaction-status" class="pill">Loading</span></div>
+          <div class="reaction-controls"><label>Acquisition run<select id="archive-reaction-session"><option value="">Latest run</option></select></label><a id="archive-reaction-download" class="primary" hidden>Download folder CSV ↓</a></div>
+          <div id="archive-reaction-legend" class="reaction-legend"></div>
+          <h3 class="reaction-plot-title">Raw fluorescence</h3>
+          <div class="reaction-chart-wrap"><canvas id="archive-raw-chart" role="img" aria-label="Saved raw fluorescence for Region 1 to Region 4"></canvas></div>
+          <h3 class="reaction-plot-title">Background-corrected fluorescence</h3>
+          <div class="reaction-chart-wrap"><canvas id="archive-corrected-chart" role="img" aria-label="Saved background-corrected fluorescence for Region 1 to Region 4"></canvas></div>
+          <p id="archive-reaction-detail"></p>
+          <p class="hint">CSV includes every recorded run in this folder: raw, smoothed, background and corrected values, linked to the original photos. Charts show the selected run and are independent of the photo date filter.</p>
+          <div id="archive-reaction-error" class="inline-error" hidden></div>
+        </article>
       </div>
     </section>
     <section id="logs" class="tab-view" hidden><div class="section-head"><div><span class="eyebrow">EXPERIMENT RECORDS</span><h2>Temperature logs</h2><p>Download or delete logs associated with each assay. Independent runs are under Unassigned.</p></div><div class="log-toolbar"><button id="refresh-logs" class="secondary">Refresh</button><button id="clear-logs" class="danger">Clear all temperature logs</button></div></div>
@@ -101,6 +111,6 @@
   </main>
   <footer><span>STEEL MEMBRANE / LAB INSTRUMENTS</span><span>Local acquisition · Traceable records</span></footer>
   <dialog id="photo-dialog"><div class="dialog-head"><span id="photo-title"></span><button id="close-photo" class="secondary">Close ×</button></div><img id="full-photo" alt="Archived photo"><div class="dialog-foot"><button id="previous-photo" class="secondary">← Previous photo</button><button id="delete-photo" class="danger">Delete photo</button><a id="download-photo" class="primary" download>Download original ↓</a><button id="next-photo" class="secondary">Next photo →</button></div></dialog>
-  <script src="/static/app.js?v=reaction-1" defer></script>
-  <script src="/static/reaction.js?v=reaction-1" defer></script>
+  <script src="/static/app.js?v=reaction-2" defer></script>
+  <script src="/static/reaction.js?v=reaction-2" defer></script>
 </body></html>

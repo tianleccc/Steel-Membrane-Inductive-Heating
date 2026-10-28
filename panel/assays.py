@@ -6,6 +6,7 @@ import shutil
 import threading
 import time
 import uuid
+import unicodedata
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -69,6 +70,18 @@ class Archive:
         (folder/'logs').mkdir()
         self.save(record)
         return record
+
+    def assert_unique_name(self, name):
+        def normalized(value):
+            return ' '.join(unicodedata.normalize('NFKC', value).split()).casefold()
+        names = [record['name'] for record in self.records()]
+        # Deleted assays can be restored; reserve their names as well.
+        for path in self.trash.glob('*/0/assay.json'):
+            if any(p.is_symlink() for p in (path, path.parent, path.parent.parent)):
+                continue
+            names.append(json.loads(path.read_text(encoding='utf-8'))['name'])
+        if normalized(name) in {normalized(value) for value in names}:
+            raise ValueError('This assay name already exists, including recoverable deleted assays. Choose a unique name.')
 
     def save(self, record):
         write_json(self.folder(record['id'])/'assay.json', record)
@@ -207,6 +220,7 @@ class Assays:
         self.camera.validate(interval,count)
         with self.lock:
             self.standalone()
+            self.archive.assert_unique_name(data['name'])
             h,c=self.heater.snapshot(),self.camera.snapshot()
             if h['active'] or c['running'] or c['busy'] or c.get('pending'):
                 raise ValueError('Stop independent heating and acquisition before starting an assay')

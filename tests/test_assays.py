@@ -44,8 +44,11 @@ class AssayTests(unittest.TestCase):
     def post(self, path, data=None):
         return self.client.post('/api/'+path,json=data or {},headers={'X-Panel-Token':self.token})
 
-    def start(self):
-        response=self.post('assays/start',self.payload)
+    def start(self, name=None):
+        payload=dict(self.payload)
+        if name is not None:
+            payload['name']=name
+        response=self.post('assays/start',payload)
         self.assertEqual(response.status_code,200,response.text)
         return response.json
 
@@ -122,20 +125,34 @@ class AssayTests(unittest.TestCase):
         self.assertEqual(self.post('stop').status_code,200)
         self.assertEqual(self.manager.last['status'],'stopped')
 
-    def test_duplicate_names_are_separate_and_operator_filters_work(self):
+    def test_duplicate_names_rejected_across_operators_and_normalized_spelling(self):
         first=self.start()
         self.post('assays/stop')
         self.payload['operator']='Bob'
-        second=self.start()
+        for name in ('Same name / trial', '  SAME   name / trial  ', 'Ｓａｍｅ name / trial'):
+            response=self.post('assays/start',dict(self.payload,name=name))
+            self.assertEqual(response.status_code,400,response.text)
+            self.assertIn('name already exists',response.json['error'])
+            self.assertFalse(self.heater.snapshot()['active'])
+            self.assertFalse(self.camera.snapshot()['running'])
+            self.assertEqual(len(self.manager.archive.records()),1)
+        second=self.start('Different assay')
         self.assertNotEqual(first['id'],second['id'])
         rows=self.client.get('/api/assays?operator=Alice').json['items']
         self.assertEqual([r['id'] for r in rows],[first['id']])
         logs=self.client.get('/api/logs?operator=Alice').json['items']
         self.assertEqual([r['assay_id'] for r in logs],[first['id']])
 
+    def test_deleted_assay_name_reserved_for_restore(self):
+        record=self.start(); self.post('assays/stop')
+        deleted=self.post('archive/delete',dict(kind='assay',assay_id=record['id']))
+        self.assertEqual(deleted.status_code,200)
+        self.assertEqual(self.post('assays/start',self.payload).status_code,400)
+        self.assertEqual(self.post('archive/restore',dict(trash_id=deleted.json['trash_id'])).status_code,200)
+
     def test_photo_delete_and_restore_preserve_other_assays(self):
         first=self.start(); self.post('assays/stop')
-        second=self.start(); self.post('assays/stop')
+        second=self.start('Second assay'); self.post('assays/stop')
         one,two=self.photo(first['id']),self.photo(second['id'])
         response=self.post('archive/delete',dict(kind='photos',assay_id=first['id'],name=one.name))
         self.assertEqual(response.status_code,200,response.text)
@@ -186,7 +203,7 @@ class AssayTests(unittest.TestCase):
 
     def test_clear_logs_checks_all_folders_before_deleting(self):
         self.start(); self.post('assays/stop')
-        self.start()
+        self.start('Second assay')
         self.assertEqual(self.post('archive/clear-logs').status_code,400)
         self.assertEqual(len(self.client.get('/api/logs').json['items']),2)
         self.post('assays/stop')

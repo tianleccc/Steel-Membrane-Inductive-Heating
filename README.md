@@ -128,7 +128,14 @@ Heating and timed acquisition operate independently. **Closing the browser does 
 4. Heating and acquisition stop together at the end of the assay. **Stop assay** and **Stop all** end the run early without deleting saved data. A camera or temperature-control fault also ends the assay and records the failure reason.
 5. Open **Photo archive**, select an operator or search by assay name, and open an assay folder. **View temperature logs** opens the corresponding CSV records.
 
-Each run gets a unique ID, even when the assay name and operator are repeated. The manifest stores the name, operator, target, duration, interval, PID gains, start/end times, and run status. Operator names are searchable labels, not authenticated accounts or access restrictions. All users on this shared panel can see the archive.
+One named assay owns one folder. Assay names must be unique across operators;
+case, repeated/outer whitespace and equivalent Unicode forms do not create a
+new name. Names in recoverable deleted assay folders are also reserved so an
+undo cannot introduce duplicates. Duplicate names are rejected before creating
+a folder or starting either instrument. Each run also gets a unique internal ID.
+The manifest stores the name, operator, target, duration, interval, PID gains,
+start/end times and run status. Operator names are searchable labels, not
+authenticated accounts or access restrictions. All users share the archive.
 
 An assay owns both instruments while it runs. Independent start controls are blocked to prevent overlapping jobs. Independent runs still work outside an assay; their data and all existing pre-assay files appear under **Unassigned**. No existing files are relabeled or moved automatically.
 
@@ -269,15 +276,17 @@ first photo using the actual monotonic capture clock, not an assumed interval.
 The first corrected value is zero. Open the corresponding **Photo archive**
 folder and click the green **View amplification curve** button to scroll to
 the two charts below the photos: raw and background-corrected fluorescence.
-Choose an acquisition run there if the folder contains multiple runs.
-**Download folder CSV** exports all recorded runs in that folder. Old photos are
+Named assay folders show their one assay directly, with **Download assay CSV**.
+Only **Unassigned**, the collection of independent manual captures, has a manual
+acquisition selector and a combined manual-captures CSV. Old photos are
 not retroactively analyzed. Auto exposure and white balance remain unchanged;
 these are relative fluorescence measurements in arbitrary units.
 
 Each original JPEG has a matching `.reaction.csv` containing its raw, smoothed,
 background and corrected values, photo filename, timestamp, reaction ID, ROI
 coordinates and algorithm settings. These immutable rows survive restarts and
-are combined by **Download folder CSV** or photo ZIP/USB export. Reaction
+are combined into one assay CSV download or photo ZIP/USB export. The per-photo
+CSV files are measurements of the same assay, not additional assay runs. Reaction
 records have no independent delete endpoint: deleting/restoring a photo moves
 its CSV together, and deleting/restoring an assay moves the entire folder.
 Clearing temperature logs never removes reaction data. Deleting an earlier

@@ -43,6 +43,10 @@ setInterval(updateReactionOverlay, 500);
 function syncReactionFolder() {
   if (archiveReactionFolder === selectedAssay) return;
   archiveReactionFolder = selectedAssay; archiveReactionPoints = []; archiveReactionKey = null;
+  const manual = selectedAssay === 'unassigned';
+  $('archive-session-control').hidden = !manual;
+  $('archive-reaction-download').textContent = manual ? 'Download manual captures CSV ↓' : 'Download assay CSV ↓';
+  $('archive-reaction-hint').textContent = manual ? 'Unassigned contains independent manual captures, not named assays. Choose a manual acquisition to view its curves. CSV includes all recorded manual captures.' : 'One folder, one assay. CSV contains all measurements for this assay, linked to its original photos. Both charts are independent of the photo date filter.';
   $('archive-reaction-session').replaceChildren(new Option('Latest run', ''));
   $('archive-reaction-download').hidden = true;
   $('archive-reaction-folder').textContent = assayRecords.find(r => r.id === selectedAssay)?.name || '';
@@ -93,7 +97,7 @@ async function loadArchiveReaction() {
     $('archive-reaction-session').value = session;
     archiveReactionPoints = data.points;
     const count = data.points.length;
-    badge('archive-reaction-status', count ? `${count} photos · Selected run` : 'No recorded reaction data', count ? 'ok' : '');
+    badge('archive-reaction-status', count ? `${count} photos · ${folder === 'unassigned' ? 'Manual acquisition' : 'This assay'}` : 'No recorded reaction data', count ? 'ok' : '');
     $('archive-reaction-detail').textContent = count ? `${localDate(data.points[0].utc)} · ${number(data.points[count-1].time_min,2)} min · Region colors match the preview.` : 'This folder has no recorded reaction measurements. Earlier photos are not analyzed retroactively.';
     $('archive-reaction-download').hidden = !data.sessions.length;
     $('archive-reaction-download').href = `/reaction.csv?assay_id=${encodeURIComponent(folder)}`;

@@ -7,6 +7,8 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 
+from .reaction import ReactionSession, write_measurement
+
 
 class Camera:
     def __init__(self, config, temperature):
@@ -22,9 +24,10 @@ class Camera:
         self.generation = 0
         self.job = None
         self.single = False
+        self.reaction = None
         self.state = dict(ready=False, error=None, preview_light=False, running=False,
                           captured=0, count=0, interval_s=30, latest=None, busy=False,
-                          assay_id=None)
+                          assay_id=None, reaction_id=None)
         self.photos = Path(config['data_dir'])/'photos'
         self.photos.mkdir(parents=True, exist_ok=True)
 
@@ -70,12 +73,16 @@ class Camera:
                 raise ValueError('Camera not ready')
             if self.job or self.single or self.state['busy']:
                 raise ValueError('An acquisition job is already running')
+            self.reaction = ReactionSession(self.c)
             self.cancel.clear()
             self.generation += 1
             self.job = dict(interval=interval, count=count, next=time.monotonic(),
                             generation=self.generation, context=context, deadline=deadline)
             self.state.update(running=True, captured=0, count=count, interval_s=interval,
-                              error=None, assay_id=context.get('id'))
+                              error=None, assay_id=context.get('id'), reaction_id=self.reaction.id)
+
+    def validate_reaction(self):
+        ReactionSession(self.c)
 
     def capture(self):
         with self.lock:
@@ -83,9 +90,10 @@ class Camera:
                 raise ValueError('Camera not ready')
             if self.job or self.single or self.state['busy']:
                 raise ValueError('Wait for the current capture to finish')
+            self.reaction = ReactionSession(self.c)
             self.cancel.clear()
             self.single = True
-            self.state.update(assay_id=None, error=None)
+            self.state.update(assay_id=None, error=None, reaction_id=self.reaction.id)
 
     def stop(self):
         # Wake warmup immediately; generation prevents a stopped job being revived.
@@ -114,6 +122,8 @@ class Camera:
             if self.cancel.wait(self.c['led_warmup_s']):
                 return False
             name = datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%S_%fZ')
+            captured_at = datetime.now(timezone.utc).isoformat()
+            captured_clock = time.monotonic()
             # queue=False ensures a fresh exposure after illumination warmup.
             request = self.cam.capture_request()
             try:
@@ -123,14 +133,34 @@ class Camera:
                 picture = request.make_image('main')
                 picture.thumbnail((480,270))
                 picture.save(folder/(name+'.thumb.jpg'), 'JPEG', quality=80)
-                meta = dict(id=name, utc=datetime.now(timezone.utc).isoformat(),
+                meta = dict(id=name, utc=captured_at,
                             temperature=self.temperature(), camera=request.get_metadata(),
                             assay_id=context.get('id'), assay_name=context.get('name'),
                             operator=context.get('operator'))
-                (folder/(name+'.json')).write_text(json.dumps(meta,default=str),encoding='utf-8')
+                measurement = None
+                analysis_error = None
+                try:
+                    if self.reaction is None:
+                        self.reaction = ReactionSession(self.c)
+                    measurement = self.reaction.analyze(folder/(name+'.pending'), name+'.jpg',
+                                                        captured_at, context.get('id'), captured_clock)
+                    write_measurement(folder/(name+'.reaction.csv.pending'), measurement[0])
+                    (folder/(name+'.reaction.csv.pending')).replace(folder/(name+'.reaction.csv'))
+                    meta['reaction_id'] = self.reaction.id
+                except Exception as error:
+                    # Keep the original observation even when analysis fails. Never
+                    # display a fabricated zero or continue a partially logged run.
+                    analysis_error = error
+                    meta['reaction_error'] = str(error)
+                (folder/(name+'.json.pending')).write_text(json.dumps(meta,default=str),encoding='utf-8')
+                (folder/(name+'.json.pending')).replace(folder/(name+'.json'))
                 (folder/(name+'.pending')).replace(folder/(name+'.jpg'))
                 with self.lock:
                     self.state['latest'] = name
+                    self.state['reaction_id'] = self.reaction.id if self.reaction else None
+                if analysis_error:
+                    raise RuntimeError(f'Photo saved, but reaction analysis failed: {analysis_error}') from analysis_error
+                self.reaction.commit(measurement)
                 return True
             finally:
                 request.release()

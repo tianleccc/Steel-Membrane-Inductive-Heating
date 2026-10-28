@@ -213,9 +213,10 @@ Open **Photo archive**, then open an assay folder:
   the assay entered in the panel. Extract it to get the photo folder.
 - **Export assay to USB** creates the same photo folder directly on a USB drive
   connected to the **Raspberry Pi**, including when using the offline desktop console.
-- Both exports contain only original JPEG images, in capture order, named
-  `image001.jpg`, `image002.jpg`, and so on. JSON metadata, thumbnails, and logs
-  are not included. Temperature logs remain available through their separate download.
+- Both exports contain original JPEG images, in capture order, named
+  `image001.jpg`, `image002.jpg`, and so on. When reaction measurements exist,
+  `reaction_log.csv` is included with an `Export_image` column linking each row
+  to its numbered JPEG. Temperature logs remain a separate download.
 - Spaces and Unicode in assay names are preserved; filesystem-invalid characters
   are replaced with underscores. If a USB folder already exists, a suffix such as
   ` (2)` is added so previous exports are never overwritten.
@@ -240,6 +241,48 @@ ZIP preparation needs local free space. Only the latest ZIP is retained in
 `data/.exports/`; preparing another export or restarting the service clears the
 previous ZIP, so download it before starting another export. USB exports are
 independent copies and are not cleared by the panel.
+
+## Real-time reaction measurements
+
+Every new saved photo is analyzed at full JPEG resolution, including independent
+captures and assays. **Workspace → Reaction curves** shows only corrected values
+for Region 1–4. **Check reaction area**, below the excitation-light control, shows
+the same four labeled, colored circles over the live preview without changing
+the original image or switching on the light. Enable excitation separately when
+checking fluorescence. Coordinates are in `panel/reaction_regions.json`, fitted
+to a square in the supplied top/right/bottom/left order, with radius **108 px**
+on a **4608 × 2592** image. Other capture resolutions are rejected to prevent
+misaligned measurements.
+
+The calculation matches the supplied analyzer: OpenCV HSV bounds `[35,50,50]`
+to `[85,255,255]`, raw signal `2 × sum(V)` for green pixels within each circle,
+EMA alpha `0.35`, and corrected signal `max(0, EMA − running minimum of EMA)`.
+The larger circles include surrounding black pixels, but pixels outside the
+green HSV mask do not contribute to the raw sum. This is a temporal background
+correction, not subtraction of a separate spatial background region.
+
+Each assay or timed acquisition gets an independent baseline and reaction ID;
+a single manual capture is its own one-point run. Time is measured from the
+first photo using the actual monotonic capture clock, not an assumed interval.
+The first corrected value is zero. Choose a photo folder and acquisition run
+to review saved curves, or leave **Follow current run** enabled. Old photos are
+not retroactively analyzed. Auto exposure and white balance remain unchanged;
+these are relative fluorescence measurements in arbitrary units.
+
+Each original JPEG has a matching `.reaction.csv` containing its raw, smoothed,
+background and corrected values, photo filename, timestamp, reaction ID, ROI
+coordinates and algorithm settings. These immutable rows survive restarts and
+are combined by **Download reaction CSV** or photo ZIP/USB export. Reaction
+records have no independent delete endpoint: deleting/restoring a photo moves
+its CSV together, and deleting/restoring an assay moves the entire folder.
+Clearing temperature logs never removes reaction data. Deleting an earlier
+photo does not recalculate the remaining historical EMA values.
+
+If analysis fails, the original photo is retained with `reaction_error` in its
+JSON metadata and acquisition stops with a visible error instead of recording
+a false zero. Install OpenCV on existing Pi installations with
+`sudo apt-get install python3-opencv`; `scripts/install.sh` includes this
+dependency for new installations (the venv uses system site packages).
 
 ## Instrument sleep and wake
 

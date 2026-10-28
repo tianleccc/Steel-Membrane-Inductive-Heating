@@ -11,6 +11,8 @@ import threading
 import uuid
 import zipfile
 
+from .reaction import read_rows, csv_text
+
 
 def export_name(value):
     """Keep the assay name, replacing only characters unsafe on common USB filesystems."""
@@ -66,8 +68,8 @@ class Exports:
         self.job = None
         self.cache = assays.archive.root / '.exports'
         self.cache.mkdir(exist_ok=True)
-        # Only disposable ZIP exports live here; interrupted exports can be rebuilt.
-        for path in self.cache.glob('*.zip'):
+        # Disposable export snapshots only; original reaction CSVs stay with photos.
+        for path in list(self.cache.glob('*.zip')) + list(self.cache.glob('reaction-*.csv')):
             if path.is_file() and not path.is_symlink():
                 path.unlink()
 
@@ -111,12 +113,16 @@ class Exports:
                 name = export_name(record['name'])
             if not files:
                 raise ValueError('This folder has no photos')
+            reaction_rows = read_rows(folder)
             drive = None
             if mode == 'usb':
                 drive = next((d for d in self.drives() if d['id'] == drive_id), None)
                 if not drive:
                     raise ValueError('USB drive not available. Insert it and open it in the Pi file manager, then refresh.')
             total = sum(path.stat().st_size for path,_ in files)
+            reaction_csv = csv_text(reaction_rows, {path.name: relative.name for path,relative in files}) if reaction_rows else None
+            if reaction_csv:
+                total += len(reaction_csv.encode('utf-8'))
             free = drive['free_bytes'] if drive else shutil.disk_usage(self.cache).free
             if free < total + 64*1024*1024:
                 raise ValueError('Not enough free space for this export (64 MB reserve required)')
@@ -124,6 +130,12 @@ class Exports:
                 self.job['_zip'].unlink(missing_ok=True)
             job = dict(id=uuid.uuid4().hex, assay_id=assay_id, mode=mode, status='running',
                        completed=0, total=len(files), bytes=total, name=name, error=None)
+            if reaction_csv:
+                source = self.cache/('reaction-'+job['id']+'.csv')
+                source.write_text(reaction_csv, encoding='utf-8', newline='')
+                job['_reaction_source'] = source
+                files.append((source, Path('reaction_log.csv')))
+                job['total'] = len(files)
             self.job = job
             threading.Thread(target=self.run, args=(job,files,drive), daemon=True, name='archive-export').start()
             return self.snapshot(job['id'])
@@ -202,6 +214,8 @@ class Exports:
             if not drive:
                 (self.cache/(job['id']+'.zip')).unlink(missing_ok=True)
         finally:
+            if job.get('_reaction_source'):
+                job['_reaction_source'].unlink(missing_ok=True)
             if fd is not None:
                 os.close(fd)
 

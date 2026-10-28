@@ -108,7 +108,8 @@ class Archive:
             if kind == 'photos':
                 if name.endswith('.thumb.jpg'):
                     raise ValueError('Delete the original photo, not its thumbnail')
-                paths += [p for p in (path.with_suffix('.thumb.jpg'),path.with_suffix('.json')) if p.exists()]
+                paths += [p for p in (path.with_suffix('.thumb.jpg'),path.with_suffix('.json'),
+                                      path.with_suffix('.reaction.csv')) if p.exists()]
         return self.move_to_trash(paths, assay_id, kind)
 
     def delete_logs(self, records):
@@ -211,6 +212,7 @@ class Assays:
                 raise ValueError('Stop independent heating and acquisition before starting an assay')
             if not c['ready']:
                 raise ValueError('Camera not ready')
+            self.camera.validate_reaction()
             record=self.archive.create(dict(name=data['name'].strip(),operator=data['operator'].strip(),
                 target=data['target'],duration_minutes=data['duration_minutes'],interval_s=interval,
                 expected_photos=count,pid=gains,started_at=utc_now(),ended_at=None,status='starting',reason=None))

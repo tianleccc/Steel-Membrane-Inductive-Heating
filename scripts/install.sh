@@ -6,7 +6,7 @@ if [[ $(id -u) == 0 ]]; then
   exit 1
 fi
 sudo apt-get update
-sudo apt-get install -y git python3-venv python3-picamera2 python3-gpiozero python3-lgpio i2c-tools
+sudo apt-get install -y git python3-venv python3-picamera2 python3-gpiozero python3-lgpio python3-opencv python3-numpy i2c-tools
 sudo raspi-config nonint do_i2c 0
 sudo bash scripts/configure-sensor-bus.sh
 python3 -m venv --system-site-packages .venv

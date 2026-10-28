@@ -225,7 +225,12 @@ class AssayTests(unittest.TestCase):
             def thumbnail(self,size): pass
             def save(self,path,*args,**kwargs): Path(path).write_bytes(b'thumbnail')
         class Request:
-            def save(self,stream,path,**kwargs): Path(path).write_bytes(b'photo')
+            def save(self,stream,path,**kwargs):
+                import cv2
+                import numpy as np
+                ok, data = cv2.imencode('.jpg', np.zeros((2592,4608,3),np.uint8))
+                assert ok
+                Path(path).write_bytes(data.tobytes())
             def make_image(self,stream): return Image()
             def get_metadata(self): return {'ExposureTime':10000}
             def release(self): pass

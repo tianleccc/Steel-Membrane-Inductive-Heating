@@ -15,6 +15,7 @@ from .hardware import IRHardware
 from .heating import Heater
 from .exports import Exports
 from .power import Power
+from .reaction import settings as reaction_settings, read_rows, series, csv_text
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -262,6 +263,32 @@ def create_app(config=None, heater=None, camera=None):
                     items.append(dict(name=path.name,assay_id=record['id'],assay_name=record['name'],
                                       operator=record['operator'],status=record['status']))
         return jsonify(items=items)
+
+    @app.get('/api/reaction/regions')
+    def reaction_regions():
+        return jsonify(reaction_settings())
+
+    @app.get('/api/reaction')
+    def reaction_data():
+        assay_id = request.args.get('assay_id', 'unassigned')
+        with assays.lock:
+            rows = read_rows(archive.folder(assay_id))
+        return jsonify(assay_id=assay_id, **series(rows, request.args.get('session_id') or None))
+
+    @app.get('/reaction.csv')
+    def reaction_download():
+        import io
+        assay_id = request.args.get('assay_id', 'unassigned')
+        with assays.lock:
+            rows = read_rows(archive.folder(assay_id))
+        session_id = request.args.get('session_id')
+        if session_id:
+            series(rows, session_id)  # Validate instead of returning a misleading empty CSV.
+            rows = [row for row in rows if row['Reaction_ID'] == session_id]
+        if not rows:
+            raise ValueError('No reaction measurements in this folder yet')
+        return send_file(io.BytesIO(csv_text(rows).encode('utf-8')), mimetype='text/csv',
+                         as_attachment=True, download_name=f'{assay_id}_reaction.csv', max_age=0)
 
     @app.get('/logs/<name>')
     def log(name):

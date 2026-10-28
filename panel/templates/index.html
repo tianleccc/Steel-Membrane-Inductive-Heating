@@ -4,7 +4,7 @@
   <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
   <meta name="panel-token" content="{{ token }}">
   <title>Steel Membrane · Instrument Panel</title>
-  <link rel="stylesheet" href="/static/style.css?v=power-1">
+  <link rel="stylesheet" href="/static/style.css?v=reaction-1">
 </head>
 <body>
   <header><a class="brand" href="/"><span class="mark">S<span>M</span></span><span>STEEL MEMBRANE<small>Imaging & induction heating</small></span></a><div class="header-right"><span id="connection" class="pill">Connecting</span><button id="stop-all" class="danger">■ Stop all</button></div></header>
@@ -19,7 +19,7 @@
     <div id="undo-bar" hidden><span>Item moved to Trash.</span><button id="undo-delete" class="text-button">Undo deletion</button><button id="dismiss-undo" class="text-button" aria-label="Dismiss undo notification">×</button></div>
     <section id="live" class="tab-view">
       <article class="card assay-card">
-        <div class="card-head"><div><span class="eyebrow">EXPERIMENT / ASSAY</span><h2>Run an assay</h2><p>One experiment. One folder. Photos and temperature logs, together.</p></div><span id="assay-status" class="pill">Ready to configure</span></div>
+        <div class="card-head"><div><span class="eyebrow">EXPERIMENT / ASSAY</span><h2>Run an assay</h2><p>Photos, reaction curves and temperature logs in one experiment folder.</p></div><span id="assay-status" class="pill">Ready to configure</span></div>
         <form id="assay-form"><fieldset id="assay-fields"><div class="assay-identity">
           <label>Assay name<input id="assay-name" type="text" maxlength="120" placeholder="e.g. Membrane stability · Trial 01" required></label>
           <label>Operator<input id="assay-operator" type="text" maxlength="80" placeholder="Your name" list="operator-names" autocomplete="name" required></label>
@@ -36,8 +36,9 @@
       <div class="module-heading"><span class="eyebrow">INDEPENDENT INSTRUMENT CONTROLS</span><span>Manual controls are locked while an assay is running.</span></div>
       <div class="workspace">
         <article class="card imaging"><div class="card-head"><div><span class="eyebrow">01 / IMAGING</span><h2>Live preview</h2></div><span id="camera-status" class="pill">Starting camera</span></div>
-          <div class="preview"><img id="preview" alt="Live camera preview" hidden><div id="preview-empty"><span class="viewfinder">⌗</span><strong>Waiting for camera</strong><span>Live preview will appear when the camera is ready.</span></div><span class="live-label"><i></i> LIVE VIEW</span><span class="preview-tag">Full-resolution photos · Reduced-resolution preview</span></div>
+          <div class="preview"><img id="preview" alt="Live camera preview" hidden><svg id="reaction-overlay" aria-label="Reaction regions 1 through 4" preserveAspectRatio="xMidYMid meet" hidden></svg><div id="preview-empty"><span class="viewfinder">⌗</span><strong>Waiting for camera</strong><span>Live preview will appear when the camera is ready.</span></div><span class="live-label"><i></i> LIVE VIEW</span><span class="preview-tag">Full-resolution photos · Reduced-resolution preview</span></div>
           <div class="preview-controls"><label class="toggle"><input id="light" type="checkbox"><span>Excitation light</span></label><span id="light-note">Off · Auto-on during capture</span><button id="capture" class="secondary">◎ Capture photo</button></div>
+          <div class="reaction-area-controls"><label class="toggle"><input id="check-reaction-area" type="checkbox"><span>Check reaction area</span></label><span>Show Region 1–4 on the preview to check chip alignment.</span></div>
           <p class="hint">Enable the excitation light to view fluorescence. Continuous illumination may cause photobleaching. The light turns off within 15 seconds after the page closes.</p>
           <div class="capture-plan"><div><h3>Timed acquisition</h3><p>The first capture starts immediately, followed by the selected interval.</p></div><form id="capture-form"><label>Interval <div class="unit-input"><input id="interval" type="number" min="2" max="86400" step="0.1" value="30" required><span>sec</span></div></label><label>Photo count <div class="unit-input"><input id="count" type="number" min="1" max="100000" value="20" required><span>photos</span></div></label><button id="start-camera" class="primary" type="submit">Start capture →</button><button id="stop-camera" type="button" class="secondary">Stop</button></form></div>
           <div class="progress-row"><span id="capture-progress">No acquisition started</span><span id="capture-estimate">Estimated 9 min 30 sec</span></div><progress id="progress" max="20" value="0"></progress><div id="camera-error" class="inline-error" hidden></div>
@@ -59,6 +60,15 @@
           <p class="hint">{{ cutoff }} °C cutoff · Automatic stop on sensor failure<br>Heating and acquisition run independently. Closing the browser does not stop active jobs.</p><div id="heater-error" class="inline-error" hidden></div><button id="reset" class="text-button">Clear heating fault</button>
         </article>
       </div>
+      <article id="reaction-card" class="card reaction-card">
+        <div class="card-head"><div><span class="eyebrow">03 / REAL-TIME AMPLIFICATION</span><h2>Reaction curves</h2><p>Background-corrected fluorescence · One measurement per saved photo</p></div><span id="reaction-status" class="pill">Waiting for photos</span></div>
+        <div class="reaction-controls"><label>Photo folder<select id="reaction-assay"><option value="unassigned">Unassigned</option></select></label><label>Acquisition run<select id="reaction-session"><option value="">Latest run</option></select></label><label class="toggle"><input id="reaction-follow" type="checkbox" checked><span>Follow current run</span></label><a id="reaction-download" class="primary" hidden>Download reaction CSV ↓</a></div>
+        <div id="reaction-legend" class="reaction-legend"></div>
+        <div class="reaction-chart-wrap"><canvas id="reaction-chart" role="img" aria-label="Background-corrected fluorescence for Region 1 to Region 4 versus elapsed minutes"></canvas></div>
+        <p id="reaction-detail">Start an assay or timed acquisition to record a new reaction curve.</p>
+        <p class="hint">CSV includes raw, smoothed, background and corrected values linked to each photo. Each acquisition starts a fresh baseline. Reaction records stay with their photos and are included in photo exports.</p>
+        <div id="reaction-error" class="inline-error" hidden></div>
+      </article>
       <div class="footnote"><span>● Heating and excitation light stay off after startup or restart</span><span>Photos include timestamps, camera settings, and temperature records</span></div>
     </section>
     <section id="gallery" class="tab-view" hidden>
@@ -73,12 +83,13 @@
         <div id="folder-summary" class="folder-summary"></div>
         <div class="export-controls">
           <button id="download-folder" class="secondary">Download all photos (ZIP)</button>
+          <button id="folder-reaction" class="secondary">View reaction curves</button>
           <label>USB drive on this Raspberry Pi<select id="usb-drive"><option value="">Select a USB drive</option></select></label>
           <button id="refresh-usb" class="secondary">Refresh USB drives</button>
           <button id="export-usb" class="secondary">Export assay to USB</button>
           <button id="eject-usb" class="secondary">Safely eject USB</button>
         </div>
-        <p class="hint">ZIP includes all original photos and metadata, regardless of the date filter. USB export includes photos, temperature logs and assay details. Finish or stop the assay before exporting.</p>
+        <p class="hint">ZIP and USB exports include all original photos and their reaction log, regardless of the date filter. The CSV maps each measurement to its exported image. Finish or stop the assay before exporting.</p>
         <p id="usb-note" class="hint"></p>
         <div id="gallery-grid"></div><div class="pagination"><button id="prev-page" class="secondary">← Previous page</button><span id="page-info">Page 1</span><button id="next-page" class="secondary">Next page →</button></div>
       </div>
@@ -90,5 +101,6 @@
   </main>
   <footer><span>STEEL MEMBRANE / LAB INSTRUMENTS</span><span>Local acquisition · Traceable records</span></footer>
   <dialog id="photo-dialog"><div class="dialog-head"><span id="photo-title"></span><button id="close-photo" class="secondary">Close ×</button></div><img id="full-photo" alt="Archived photo"><div class="dialog-foot"><button id="previous-photo" class="secondary">← Previous photo</button><button id="delete-photo" class="danger">Delete photo</button><a id="download-photo" class="primary" download>Download original ↓</a><button id="next-photo" class="secondary">Next photo →</button></div></dialog>
-  <script src="/static/app.js?v=power-1" defer></script>
+  <script src="/static/app.js?v=reaction-1" defer></script>
+  <script src="/static/reaction.js?v=reaction-1" defer></script>
 </body></html>

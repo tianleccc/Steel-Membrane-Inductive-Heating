@@ -76,13 +76,14 @@ async function status() {
     $('assay-fields').disabled = !!active;
     $('start-assay').disabled = !!active || !h.ready || !h.enabled || !!h.fault || h.active || !c.ready || c.running || c.busy || c.pending;
     $('stop-assay').disabled = !active;
+    $('skip-amplification').hidden = !active?.melting || active.stage !== 'amplification';
     const display = active || a.last;
-    badge('assay-status', active ? 'Running · ' + duration(a.remaining_s) + ' left' : display ? display.status.charAt(0).toUpperCase() + display.status.slice(1) : 'Ready to configure', active ? 'ok' : display?.status === 'failed' ? 'error' : '');
+    badge('assay-status', active ? `${active.stage === 'melting' ? 'Melting · capture in' : active.stage === 'transition' ? 'Switching stages ·' : 'Amplification ·'} ${duration(a.remaining_s)}` : display ? display.status.charAt(0).toUpperCase() + display.status.slice(1) : 'Ready to configure', active ? 'ok' : display?.status === 'failed' ? 'error' : '');
     $('assay-run').hidden = !display;
     if (display) {
       $('assay-run-name').textContent = `${display.name} · ${display.operator}`;
-      $('assay-run-detail').textContent = active ? `${c.captured} photos saved · ${display.target} °C target` : `${display.status} · ${display.captured ?? 0} photos captured`;
-      $('assay-progress').value = active ? Math.min(1, 1 - a.remaining_s / (display.duration_minutes * 60)) : display.status === 'completed' ? 1 : 0;
+      $('assay-run-detail').textContent = active ? display.stage === 'melting' ? `Melting point ${display.melting_index+1} / ${display.melting.targets.length} · ${display.melting_target} °C · ${display.melting_captured} melting photos saved` : `${c.captured} amplification photos saved · ${display.target} °C target` : `${display.status} · ${display.captured ?? 0} photos captured`;
+      $('assay-progress').value = active ? (display.stage === 'melting' ? display.melting_captured / display.melting.targets.length : display.stage === 'transition' ? 0 : Math.min(1, 1 - a.remaining_s / (display.duration_minutes * 60))) : display.status === 'completed' ? 1 : 0;
     }
     errorBox('assay-error', a.error || (!active && display?.reason ? display.reason : null));
     const mode = state.power.mode, awake = mode === 'awake';
@@ -146,7 +147,7 @@ $('heat-form').onsubmit = event => {
 $('assay-form').onsubmit = async event => {
   event.preventDefault();
   try {
-    const result = await act('assays/start', {name: $('assay-name').value.trim(), operator: $('assay-operator').value.trim(), duration_minutes: Number($('assay-duration').value), target: Number($('assay-target').value), interval: Number($('assay-interval').value), pid: gains()}, 'Assay started. Photos and logs will be saved together.');
+    const result = await act('assays/start', {name: $('assay-name').value.trim(), operator: $('assay-operator').value.trim(), duration_minutes: Number($('assay-duration').value), target: Number($('assay-target').value), interval: Number($('assay-interval').value), melting: $('melting-enabled').checked ? {start:Number($('melting-start').value),end:Number($('melting-end').value),increment:Number($('melting-increment').value)} : null, pid: gains()}, 'Assay started. Photos and logs will be saved together.');
     if (result) { lightWanted = false; $('light').checked = false; await refreshCatalog(); }
   } catch (error) { notify(error.message); }
 };
@@ -156,6 +157,8 @@ $('capture-form').onsubmit = event => {
 };
 $('stop-heat').onclick = () => act('heater/stop', {}, 'Heating stopped');
 $('stop-camera').onclick = () => { lightWanted = false; $('light').checked = false; act('camera/stop', {}, 'Acquisition and excitation light stopped'); };
+$('melting-enabled').onchange = () => { $('melting-fields').disabled = !$('melting-enabled').checked; };
+$('skip-amplification').onclick = () => act('assays/skip', {}, 'Amplification skipped. Switching to melting.');
 $('stop-assay').onclick = () => act('assays/stop', {}, 'Assay stopped. Saved data is retained.');
 $('stop-all').onclick = () => { lightWanted = false; $('light').checked = false; act('stop', {}, 'All instruments stopped'); };
 $('reset').onclick = () => act('heater/reset', {}, 'Heating fault cleared');
@@ -248,11 +251,12 @@ function folderView() {
   $('gallery-description').textContent = record ? `${record.operator || 'Independent instrument use'}${record.started_at ? ' · ' + localDate(record.started_at) : ''}` : 'Find your experiments by operator or assay name.';
   if (record) {
     $('folder-summary').textContent = record.id === 'unassigned' ? 'Photos and logs from independent controls, including data captured before assay folders were introduced.' : `${record.status.toUpperCase()} · ${record.duration_minutes} min · ${record.target} °C · Photo interval ${record.interval_s} sec · PID ${record.pid.kp} / ${record.pid.ki} / ${record.pid.kd}${record.reason ? ' · ' + record.reason : ''}`;
+    if (record.melting) $('folder-summary').textContent += ` · ${record.amplification_skipped ? 'Amplification skipped early · ' : ''}Melting ${record.melting.start}–${record.melting.end} °C / ${record.melting.increment} °C increments · ${record.melting_captured || 0} points`;
     $('delete-assay').hidden = record.id === 'unassigned';
     $('delete-assay').disabled = ['running', 'starting'].includes(record.status);
   }
 }
-async function openFolder(id) { selectedAssay = id; page = 0; $('filter-date').value = ''; folderView(); await loadGallery(); await refreshUSB(); }
+async function openFolder(id) { selectedAssay = id; page = 0; $('filter-date').value = ''; $('photo-stage').value = 'amplification'; folderView(); await loadGallery(); await refreshUSB(); }
 async function refreshGallery() {
   await refreshCatalog();
   if (selectedAssay && !assayRecords.some(r => r.id === selectedAssay)) selectedAssay = null;
@@ -266,7 +270,7 @@ async function loadGallery() {
   if (!selectedAssay) return;
   const epoch = ++archiveEpoch;
   try {
-    let data = await api(`photos?assay_id=${encodeURIComponent(selectedAssay)}&page=${page}&date=${$('filter-date').value}`);
+    let data = await api(`photos?assay_id=${encodeURIComponent(selectedAssay)}&page=${page}&date=${$('filter-date').value}&stage=${$('photo-stage').value}`);
     if (epoch !== archiveEpoch) return;
     if (page > 0 && !data.items.length) { page = Math.max(0, Math.ceil(data.total / 24) - 1); return loadGallery(); }
     photos = data.items; total = data.total;
@@ -300,6 +304,7 @@ $('next-photo').onclick = async () => { if (selected < photos.length - 1) showPh
 $('photo-dialog').onkeydown = event => { if (event.key === 'ArrowLeft' && !$('previous-photo').disabled) $('previous-photo').click(); if (event.key === 'ArrowRight' && !$('next-photo').disabled) $('next-photo').click(); };
 $('prev-page').onclick = () => { page--; loadGallery(); };
 $('next-page').onclick = () => { page++; loadGallery(); };
+$('photo-stage').onchange = () => { page = 0; loadGallery(); };
 $('filter-date').onchange = () => { page = 0; loadGallery(); };
 $('back-folders').onclick = () => { selectedAssay = null; archiveEpoch++; refreshGallery(); };
 $('archive-operator').onchange = renderFolders;

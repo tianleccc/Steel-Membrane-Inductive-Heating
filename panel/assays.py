@@ -9,6 +9,7 @@ import uuid
 import unicodedata
 from datetime import datetime, timezone
 from pathlib import Path
+from .reaction import photo_folders, photo_files
 
 
 def utc_now():
@@ -55,7 +56,14 @@ class Archive:
         }
         if kind not in patterns or not isinstance(name, str) or not re.fullmatch(patterns[kind], name):
             raise ValueError('Invalid file name')
-        folder = self.folder(assay_id)/kind
+        root = self.folder(assay_id)
+        if kind == 'photos':
+            candidates = [folder/name for folder in photo_folders(root) if (folder/name).exists()]
+            if len(candidates) != 1:
+                raise ValueError('File not found or ambiguous')
+            folder = candidates[0].parent
+        else:
+            folder = root/kind
         path = folder/name
         if folder.is_symlink() or path.is_symlink() or not path.is_file():
             raise ValueError('File not found')
@@ -106,7 +114,7 @@ class Archive:
                             started_at=None, reason='Standalone captures and earlier data'))
         for record in records:
             folder = self.folder(record['id'])
-            record['photo_count'] = sum(not p.name.endswith('.thumb.jpg') for p in (folder/'photos').glob('*.jpg'))
+            record['photo_count'] = len(photo_files(folder))
             record['log_count'] = sum(1 for _ in (folder/'logs').glob('heat_*.csv'))
         return records
 
@@ -218,6 +226,7 @@ class Assays:
         self.camera.validate(interval,1)
         count=math.ceil(seconds/interval)
         self.camera.validate(interval,count)
+        melting = self.validate_melting(data.get('melting'), gains)
         with self.lock:
             self.standalone()
             self.archive.assert_unique_name(data['name'])
@@ -229,7 +238,9 @@ class Assays:
             self.camera.validate_reaction()
             record=self.archive.create(dict(name=data['name'].strip(),operator=data['operator'].strip(),
                 target=data['target'],duration_minutes=data['duration_minutes'],interval_s=interval,
-                expected_photos=count,pid=gains,started_at=utc_now(),ended_at=None,status='starting',reason=None))
+                expected_photos=count,pid=gains,started_at=utc_now(),ended_at=None,status='starting',reason=None,
+                photo_layout='stages',stage='amplification',melting=melting,amplification_captured=0,
+                melting_captured=0,melting_completed=False))
             self.active=record
             self.error=None
             try:
@@ -244,6 +255,59 @@ class Assays:
                 raise
             return dict(record)
 
+    def validate_melting(self, value, gains):
+        if value is None or value is False:
+            return None
+        if not isinstance(value,dict):
+            raise ValueError('Invalid melting settings')
+        start,end,increment = (value.get(k) for k in ('start','end','increment'))
+        if any(isinstance(v,bool) or not isinstance(v,(float,int)) or not math.isfinite(v)
+               for v in (start,end,increment)):
+            raise ValueError('Melting temperatures and increment must be finite numbers')
+        if not 0 < start < end < self.c['cutoff_c'] or not 0.1 <= increment <= end-start:
+            raise ValueError('Melting requires start < end below the safety cutoff; increment must be at least 0.1 °C and no larger than the range')
+        steps = math.ceil(round((end-start)/increment,10))+1
+        # Each point has a hard 90-second deadline: 60 seconds before capture,
+        # followed by at most 30 seconds for illumination, capture and durable analysis.
+        if steps*90 > self.c['max_duration_s']:
+            raise ValueError('Too many melting points for the maximum heating duration')
+        targets = [round(min(start+i*increment,end),6) for i in range(steps)]
+        self.heater.validate(end,steps*90,gains)
+        return dict(start=start,end=end,increment=increment,targets=targets,wait_s=60)
+
+    def skip(self):
+        with self.lock:
+            if not self.active or self.active['stage'] != 'amplification' or not self.active['melting']:
+                raise ValueError('Skip is available only during amplification with melting enabled')
+            try:
+                self.begin_transition(skipped=True)
+            except BaseException as exc:
+                self.finish('failed',str(exc))
+                raise
+
+    def begin_transition(self, skipped=False):
+        record = self.active
+        record.update(stage='transition',amplification_skipped=skipped,
+                      amplification_captured=self.camera.snapshot()['captured'],amplification_ended_at=utc_now())
+        self.camera.stop()
+        self.heater.stop()
+        self.deadline = self.clock()+30
+        self.archive.save(record)
+
+    def melting_step(self, index):
+        record = self.active
+        target = record['melting']['targets'][index]
+        if index == 0:
+            self.heater.start(target,len(record['melting']['targets'])*90,record['pid'],context=record)
+        else:
+            self.heater.retarget(target)
+        record.update(stage='melting',melting_index=index,melting_target=target)
+        self.deadline = self.clock()+90
+        self.capture_due = self.clock()+60
+        self.camera.start(60,1,context=record,deadline=self.heater.deadline,
+                          delay=60,continue_reaction=index>0)
+        self.archive.save(record)
+
     def finish(self, status, reason=None):
         with self.lock:
             if not self.active:
@@ -253,8 +317,11 @@ class Assays:
             finally:
                 self.camera.stop()
             record=dict(self.active)
+            count = self.camera.snapshot()['captured']
+            if record.get('stage') == 'amplification':
+                record['amplification_captured'] = count
             record.update(status=status,reason=reason,ended_at=utc_now(),
-                          captured=self.camera.snapshot()['captured'])
+                          captured=record.get('amplification_captured',0)+record.get('melting_captured',0))
             self.active=None
             self.last=record
             self.archive.save(record)
@@ -266,19 +333,48 @@ class Assays:
             h,c=self.heater.snapshot(),self.camera.snapshot()
             if h['fault'] or c['error'] or (not h['ready'] and not h.get('recovering')) or not c['ready']:
                 self.finish('failed',h['fault'] or c['error'] or 'An instrument became unavailable')
+            elif self.active['stage'] == 'transition':
+                if self.clock() >= self.deadline:
+                    self.finish('failed','Camera did not stop before melting')
+                elif not c['busy'] and not c['running'] and not c.get('pending') and h['ready']:
+                    self.melting_step(0)
+            elif self.active['stage'] == 'melting':
+                if self.clock() >= self.deadline or not h['active']:
+                    self.finish('failed','Melting step timed out or heating stopped')
+                elif not c['busy'] and not c['running'] and not c.get('pending'):
+                    if c['captured'] != 1:
+                        self.finish('failed','Melting photo was not recorded')
+                    else:
+                        record = self.active
+                        record['melting_captured'] += 1
+                        index = record['melting_index']+1
+                        if index == len(record['melting']['targets']):
+                            record['melting_completed'] = True
+                            self.finish('completed')
+                        elif h['ready']:
+                            self.melting_step(index)
+                        else:
+                            # Retry after feedback recovery without counting this photo twice.
+                            record['melting_captured'] -= 1
             elif self.clock() >= self.deadline:
-                self.finish('completed')
+                if self.active['melting']:
+                    self.begin_transition()
+                else:
+                    self.finish('completed')
             elif not h['active']:
                 # The heater timer is authoritative and starts just before the supervisor timer.
                 if h['remaining_s']==0 and self.heater.clock()>=self.heater.deadline:
-                    self.finish('completed')
+                    if self.active['melting']:
+                        self.begin_transition()
+                    else:
+                        self.finish('completed')
                 else:
                     self.finish('stopped','Heating stopped before the assay ended')
 
     def snapshot(self):
         with self.lock:
             return dict(active=dict(self.active) if self.active else None,last=self.last,
-                        remaining_s=max(0,self.deadline-self.clock()) if self.active else 0,error=self.error)
+                        remaining_s=max(0,(self.capture_due if self.active and self.active['stage']=='melting' else self.deadline)-self.clock()) if self.active else 0,error=self.error)
 
     def assert_deletable(self, assay_id):
         if self.active and self.active['id']==assay_id:

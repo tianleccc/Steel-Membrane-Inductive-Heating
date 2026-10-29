@@ -1,9 +1,9 @@
 {
   "image_size": [4608, 2592],
   "coordinates": [
-    {"id": 1, "center": [2389.75, 1198.25], "radius": 108, "color": "#008fc7"},
-    {"id": 2, "center": [2634.5, 1438.0], "radius": 108, "color": "#d97706"},
-    {"id": 3, "center": [2394.75, 1682.75], "radius": 108, "color": "#a855f7"},
-    {"id": 4, "center": [2150.0, 1443.0], "radius": 108, "color": "#059669"}
+    {"id": 1, "center": [2266.25, 1094.75], "radius": 108, "color": "#008fc7"},
+    {"id": 2, "center": [2505.5, 1330.5], "radius": 108, "color": "#d97706"},
+    {"id": 3, "center": [2269.75, 1569.75], "radius": 108, "color": "#a855f7"},
+    {"id": 4, "center": [2030.5, 1334.0], "radius": 108, "color": "#059669"}
   ]
 }

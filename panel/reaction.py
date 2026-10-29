@@ -21,6 +21,20 @@ FIELDS = ['Image', 'UTC', 'Assay_ID', 'Reaction_ID', 'Time_min', 'Method',
 for region_id in range(1, 5):
     FIELDS += [f'{field}_Region_{region_id}' for field in
                ('Center_X_px', 'Center_Y_px', 'Radius_px', 'Raw', 'Smoothed', 'Background', 'Corrected')]
+LEGACY_FIELDS = list(FIELDS)
+FIELDS += ['Stage', 'Setpoint_C', 'Measured_C']
+
+
+def photo_folders(folder):
+    folders = [folder/'photos', folder/'photos'/'amplification', folder/'photos'/'melting']
+    if any(p.is_symlink() for p in folders):
+        raise ValueError('Cannot read linked photo folders')
+    return folders
+
+
+def photo_files(folder):
+    return sorted(p for directory in photo_folders(folder) for p in directory.glob('*.jpg')
+                  if not p.name.endswith('.thumb.jpg'))
 
 
 def settings():
@@ -68,6 +82,7 @@ class ReactionSession:
             self.first_time = elapsed_s
         row = dict(Image=image_name, UTC=utc, Assay_ID=assay_id or 'unassigned',
                    Reaction_ID=self.id, Time_min=max(0, elapsed_s-self.first_time)/60,
+                   Stage='amplification', Setpoint_C='', Measured_C='',
                    Method=METHOD, EMA_alpha=ALPHA, HSV_low=','.join(map(str,HSV_LOW)),
                    HSV_high=','.join(map(str,HSV_HIGH)), Width_px=image.shape[1], Height_px=image.shape[0])
         for i, region in enumerate(self.settings['coordinates']):
@@ -91,12 +106,9 @@ def write_measurement(path, row):
         os.fsync(stream.fileno())
 
 
-def read_rows(folder):
-    photos = folder/'photos'
-    if photos.is_symlink():
-        raise ValueError('Cannot read linked photo folders')
+def read_rows(folder, stage=None):
     rows = []
-    for path in sorted(photos.glob('*.reaction.csv')):
+    for path in sorted(p for photos in photo_folders(folder) for p in photos.glob('*.reaction.csv')):
         photo = path.with_name(path.name.removesuffix('.reaction.csv')+'.jpg')
         if path.is_symlink() or photo.is_symlink():
             raise ValueError('Cannot read linked reaction files')
@@ -104,18 +116,29 @@ def read_rows(folder):
             continue  # A pending/incomplete capture is not a published measurement.
         with path.open(newline='', encoding='utf-8') as stream:
             reader = csv.DictReader(stream)
-            if reader.fieldnames != FIELDS:
+            if reader.fieldnames not in (FIELDS, LEGACY_FIELDS):
                 raise ValueError(f'Invalid reaction log: {path.name}')
             data = list(reader)
         if len(data) != 1 or data[0]['Image'] != photo.name:
             raise ValueError(f'Reaction log does not match its photo: {path.name}')
         row = data[0]
-        for key in ['Time_min', 'EMA_alpha', 'Width_px', 'Height_px'] + FIELDS[11:]:
+        row.setdefault('Stage', 'amplification')
+        row.setdefault('Setpoint_C', '')
+        row.setdefault('Measured_C', '')
+        if row['Stage'] not in ('amplification', 'melting'):
+            raise ValueError('Invalid reaction stage')
+        for key in ['Time_min', 'EMA_alpha', 'Width_px', 'Height_px'] + LEGACY_FIELDS[11:]:
             row[key] = float(row[key])
             if not math.isfinite(row[key]):
                 raise ValueError(f'Invalid reaction value: {path.name}')
-        rows.append(row)
-    return rows
+        for key in ('Setpoint_C', 'Measured_C'):
+            if row[key] != '':
+                row[key] = float(row[key])
+                if not math.isfinite(row[key]):
+                    raise ValueError('Invalid reaction temperature')
+        if stage is None or row['Stage'] == stage:
+            rows.append(row)
+    return sorted(rows, key=lambda r: r['Image'])
 
 
 def csv_text(rows, export_names=None):
@@ -142,3 +165,28 @@ def series(rows, session_id=None):
                    corrected=[row[f'Corrected_Region_{i}'] for i in range(1,5)])
               for row in rows if row['Reaction_ID'] == chosen]
     return dict(sessions=list(reversed(list(sessions.values()))), session_id=chosen, points=points)
+
+
+def melting_series(rows, completed=False):
+    points = [dict(photo=r['Image'], utc=r['UTC'], time_min=r['Time_min'],
+                   temperature=r['Setpoint_C'], measured_c=r['Measured_C'],
+                   raw=[r[f'Raw_Region_{i}'] for i in range(1,5)])
+              for r in rows if r['Stage'] == 'melting' and r['Setpoint_C'] != '']
+    derivative = []
+    if completed and len(points) >= 2:
+        for j, point in enumerate(points):
+            left, right = points[max(0,j-1)], points[min(len(points)-1,j+1)]
+            span = right['temperature']-left['temperature']
+            if span <= 0:
+                raise ValueError('Melting temperatures must increase')
+            # One-sided differences at endpoints, nonuniform three-point gradient inside.
+            values = [(a-b)/span for a,b in zip(left['raw'],right['raw'])]
+            if 0 < j < len(points)-1:
+                a = point['temperature']-left['temperature']
+                b = right['temperature']-point['temperature']
+                if a <= 0 or b <= 0:
+                    raise ValueError('Melting temperatures must increase')
+                values = [(b*(l-m)/a+a*(m-r)/b)/(a+b)
+                          for l,m,r in zip(left['raw'],point['raw'],right['raw'])]
+            derivative.append(dict(temperature=point['temperature'], derivative=values))
+    return dict(points=points, derivative=derivative, completed=completed)

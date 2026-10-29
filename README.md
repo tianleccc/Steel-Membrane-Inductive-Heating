@@ -348,6 +348,40 @@ under `~/.config/steel-membrane-console`. Wireless access remains available at
 
 ## Service management and troubleshooting
 
+### Amplification followed by melting
+
+Enable **Melting curve** in **Run an assay** to configure start/end temperatures
+and the increment (default 1 °C). Amplification runs first; **Skip → Melting curve**
+cancels its remaining acquisition and safely waits for the camera before advancing.
+Without melting enabled, the assay still ends after amplification as before.
+
+Melting includes both endpoints (the last increment can be smaller). Each setpoint
+command starts a 60-second wait, followed by illumination warmup and one photo.
+This is a timed protocol, not a wait for thermal equilibrium. A point fails closed
+if capture/analysis has not completed within 90 seconds; all points together must
+fit the configured maximum heating duration. Existing cutoff and sensor-fault
+protection apply throughout; Stop and service restart never resume heating.
+
+The Workspace shows the current assay's amplification and live melting data.
+After all melting points complete, it also shows **−dF/dT**: finite differences
+of raw fluorescence against commanded temperature, with one-sided endpoints and
+a nonuniform three-point interior gradient. Melting uses neither amplification's
+EMA nor its running-minimum baseline correction. An interrupted sweep has no
+completed derivative plot. The same plots are available in its archive folder.
+
+New named assays store photos and linked per-photo CSVs in
+`photos/amplification/` and `photos/melting/`; the archive stage selector separates
+them. Download assay CSV includes both stages, identified by `Stage`, `Setpoint_C`
+and `Measured_C`. Amplification raw/smoothed/background/corrected columns remain
+available; melting plots use the raw columns. ZIP/USB exports retain the two
+photo subfolders and map each CSV row to its exported image. Photo deletion and
+Undo always move the linked measurement with it. Legacy flat folders and older
+CSV schemas remain readable without modifying existing files.
+
+Region calibration was updated from the manually selected 2026-10-29 coordinates:
+the four centers are least-squares fitted to a square, preserving Region 1–4 order,
+with a common 108-pixel radius. Historical CSVs retain their recorded ROI geometry.
+
 ```bash
 sudo systemctl status steel-membrane
 journalctl -u steel-membrane -n 100 --no-pager

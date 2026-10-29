@@ -257,7 +257,7 @@ class AssayTests(unittest.TestCase):
         self.camera.led=LED(); self.camera.cam=Sensor()
         with patch('panel.camera.time.monotonic',return_value=101):
             self.assertTrue(self.camera.save(record,106))
-        folder=self.manager.archive.folder(record['id'])/'photos'
+        folder=self.manager.archive.folder(record['id'])/'photos'/'amplification'
         metadata=json.loads(next(folder.glob('*.json')).read_text())
         self.assertEqual(metadata['assay_id'],record['id'])
         self.assertEqual(metadata['operator'],'Alice')

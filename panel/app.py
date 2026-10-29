@@ -15,7 +15,7 @@ from .hardware import IRHardware
 from .heating import Heater
 from .exports import Exports
 from .power import Power
-from .reaction import settings as reaction_settings, read_rows, series, csv_text
+from .reaction import settings as reaction_settings, read_rows, series, csv_text, photo_files, melting_series
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -208,6 +208,11 @@ def create_app(config=None, heater=None, camera=None):
         assays.finish('stopped','Stopped by operator')
         return jsonify(ok=True)
 
+    @app.post('/api/assays/skip')
+    def assay_skip():
+        assays.skip()
+        return jsonify(ok=True)
+
     @app.get('/api/assays')
     def assay_list():
         with assays.lock:
@@ -227,9 +232,13 @@ def create_app(config=None, heater=None, camera=None):
             raise ValueError('Invalid date format')
         assay_id=request.args.get('assay_id','unassigned')
         with assays.lock:
-            folder=archive.folder(assay_id)/'photos'
-            files=sorted((p for p in folder.glob(f'{date}*.jpg')
-                          if not p.name.endswith('.thumb.jpg') and not p.is_symlink()),reverse=True)
+            folder=archive.folder(assay_id)
+            stage=request.args.get('stage','')
+            if stage not in ('','amplification','melting'):
+                raise ValueError('Invalid photo stage')
+            files=sorted((p for p in photo_files(folder) if p.name.startswith(date) and not p.is_symlink()
+                          and (not stage or (p.parent.name if p.parent.name != 'photos' else 'amplification') == stage)),
+                         key=lambda p:p.name,reverse=True)
             items=[]
             for path in files[page*24:page*24+24]:
                 try:
@@ -237,6 +246,7 @@ def create_app(config=None, heater=None, camera=None):
                 except (OSError,ValueError):
                     metadata={}
                 items.append(dict(id=path.stem,utc=metadata.get('utc'),assay_id=assay_id,
+                                  stage=metadata.get('stage','amplification'),
                                   temperature=metadata.get('temperature',{}).get('temperature')))
         return jsonify(items=items,total=len(files),page=page)
 
@@ -272,8 +282,11 @@ def create_app(config=None, heater=None, camera=None):
     def reaction_data():
         assay_id = request.args.get('assay_id', 'unassigned')
         with assays.lock:
-            rows = read_rows(archive.folder(assay_id))
-        return jsonify(assay_id=assay_id, **series(rows, request.args.get('session_id') or None))
+            folder = archive.folder(assay_id)
+            rows = read_rows(folder)
+            completed = assay_id != 'unassigned' and json.loads((folder/'assay.json').read_text()).get('melting_completed',False)
+        return jsonify(assay_id=assay_id, melting=melting_series(rows,completed),
+                       **series([r for r in rows if r['Stage']=='amplification'], request.args.get('session_id') or None))
 
     @app.get('/api/reaction/current')
     def current_reaction():
@@ -289,10 +302,16 @@ def create_app(config=None, heater=None, camera=None):
                     folder = archive.folder(assay_id)
                 except ValueError:
                     pass  # The completed current assay may have been deleted.
-            rows = [row for row in read_rows(folder)
-                    if row['Reaction_ID'] == session_id] if folder else []
-            data = series(rows)
+            rows = read_rows(folder) if folder else []
+            # A named assay has two stages but remains one current experiment.
+            record = assays.active or assays.last
+            current_assay = record if record and record['id'] == assay_id else None
+            if not current_assay:
+                rows = [row for row in rows if row['Reaction_ID'] == session_id]
+            data = series([r for r in rows if r['Stage']=='amplification'])
+            melting = melting_series(rows,bool(current_assay and current_assay.get('melting_completed')))
         return jsonify(assay_id=assay_id, session_id=session_id, points=data['points'],
+                       melting=melting,
                        acquiring=bool(snapshot['running'] or snapshot['busy'] or snapshot.get('pending')))
 
     @app.get('/reaction.csv')

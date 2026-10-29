@@ -11,7 +11,7 @@ import threading
 import uuid
 import zipfile
 
-from .reaction import read_rows, csv_text
+from .reaction import read_rows, csv_text, photo_files, photo_folders
 
 
 def export_name(value):
@@ -95,14 +95,16 @@ class Exports:
             photos = folder/'photos'
             if photos.is_symlink():
                 raise ValueError('Cannot export linked folders')
+            if any(p.is_symlink() for directory in photo_folders(folder) if directory.exists() for p in directory.iterdir()):
+                raise ValueError('Cannot export linked files')
             originals = []
             # Capture filenames are UTC timestamps, so lexical order is acquisition order.
-            for path in sorted(photos.glob('*')):
+            for path in photo_files(folder):
                 if path.is_symlink():
                     raise ValueError('Cannot export linked files')
                 if path.is_file() and path.suffix == '.jpg' and not path.name.endswith('.thumb.jpg'):
                     originals.append(path)
-            files = [(path, Path(f'image{index:03d}.jpg'))
+            files = [(path, (Path(path.parent.name) if path.parent != photos else Path())/f'image{index:03d}.jpg')
                      for index, path in enumerate(originals, 1)]
             manifest = folder/'assay.json'
             name = 'Unassigned'
@@ -120,7 +122,7 @@ class Exports:
                 if not drive:
                     raise ValueError('USB drive not available. Insert it and open it in the Pi file manager, then refresh.')
             total = sum(path.stat().st_size for path,_ in files)
-            reaction_csv = csv_text(reaction_rows, {path.name: relative.name for path,relative in files}) if reaction_rows else None
+            reaction_csv = csv_text(reaction_rows, {path.name: relative.as_posix() for path,relative in files}) if reaction_rows else None
             if reaction_csv:
                 total += len(reaction_csv.encode('utf-8'))
             free = drive['free_bytes'] if drive else shutil.disk_usage(self.cache).free

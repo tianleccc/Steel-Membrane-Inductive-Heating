@@ -2,6 +2,7 @@
 let reactionRegions = null, reactionPoints = [], reactionKey = null, reactionBusy = false;
 let liveReactionSession = null;
 let archiveReactionFolder = null, archiveReactionPoints = [], archiveReactionKey = null, archiveReactionBusy = false;
+let liveMelting = {points:[],derivative:[]}, archiveMelting = {points:[],derivative:[]};
 
 function reactionSvg(tag, attributes, text) {
   const node = document.createElementNS('http://www.w3.org/2000/svg', tag);
@@ -43,6 +44,7 @@ setInterval(updateReactionOverlay, 500);
 function syncReactionFolder() {
   if (archiveReactionFolder === selectedAssay) return;
   archiveReactionFolder = selectedAssay; archiveReactionPoints = []; archiveReactionKey = null;
+  archiveMelting = {points:[],derivative:[]};
   const manual = selectedAssay === 'unassigned';
   $('archive-session-control').hidden = !manual;
   $('archive-reaction-download').textContent = manual ? 'Download manual captures CSV ↓' : 'Download assay CSV ↓';
@@ -66,15 +68,16 @@ async function loadCurrentReaction() {
   if ($('live').hidden || reactionBusy) return;
   const session = state?.camera.reaction_id || null;
   if (session !== liveReactionSession) {
-    liveReactionSession = session; reactionPoints = []; reactionKey = null; drawReactionChart();
+    liveReactionSession = session; reactionPoints = []; reactionKey = null; liveMelting = {points:[],derivative:[]}; drawReactionChart();
   }
-  const key = JSON.stringify([session, state?.camera.latest, state?.camera.running, state?.camera.busy, archiveEpoch]);
+  const key = JSON.stringify([session, state?.camera.latest, state?.camera.running, state?.camera.busy, state?.assay.active?.stage, state?.assay.last?.status, archiveEpoch]);
   if (key === reactionKey) return;
   reactionBusy = true;
   try {
     const data = await api('reaction/current');
     if (session !== (state?.camera.reaction_id || null)) return;
     reactionPoints = data.points;
+    liveMelting = data.melting;
     const count = reactionPoints.length;
     badge('reaction-status', count ? `${data.acquiring ? 'Live' : 'Current run'} · ${count} photos` : 'Waiting for current acquisition', count ? 'ok' : '');
     $('reaction-detail').textContent = count ? `${assayRecords.find(r => r.id === data.assay_id)?.name || 'Unassigned'} · Current acquisition · ${localDate(reactionPoints[0].utc)} · Latest ${number(reactionPoints[count-1].time_min,2)} min` : 'Start an assay or timed acquisition. Saved runs are available inside their Photo archive folders.';
@@ -87,7 +90,7 @@ async function loadArchiveReaction() {
   syncReactionFolder();
   if ($('gallery').hidden || !selectedAssay || archiveReactionBusy) return;
   const folder = selectedAssay, session = $('archive-reaction-session').value;
-  const key = JSON.stringify([folder, session, state?.camera.latest, archiveEpoch]);
+  const key = JSON.stringify([folder, session, state?.camera.latest, state?.assay.last?.status, archiveEpoch]);
   if (key === archiveReactionKey) return;
   archiveReactionBusy = true;
   try {
@@ -96,10 +99,12 @@ async function loadArchiveReaction() {
     $('archive-reaction-session').replaceChildren(new Option('Latest run', ''), ...data.sessions.map(s => new Option(`${localDate(s.utc)} · ${s.count} photos`, s.id)));
     $('archive-reaction-session').value = session;
     archiveReactionPoints = data.points;
+    archiveMelting = data.melting;
     const count = data.points.length;
-    badge('archive-reaction-status', count ? `${count} photos · ${folder === 'unassigned' ? 'Manual acquisition' : 'This assay'}` : 'No recorded reaction data', count ? 'ok' : '');
+    const totalCount = count+data.melting.points.length;
+    badge('archive-reaction-status', totalCount ? `${totalCount} photos · ${folder === 'unassigned' ? 'Manual acquisition' : 'This assay'}` : 'No recorded reaction data', totalCount ? 'ok' : '');
     $('archive-reaction-detail').textContent = count ? `${localDate(data.points[0].utc)} · ${number(data.points[count-1].time_min,2)} min · Region colors match the preview.` : 'This folder has no recorded reaction measurements. Earlier photos are not analyzed retroactively.';
-    $('archive-reaction-download').hidden = !data.sessions.length;
+    $('archive-reaction-download').hidden = !data.sessions.length && !data.melting.points.length;
     $('archive-reaction-download').href = `/reaction.csv?assay_id=${encodeURIComponent(folder)}`;
     errorBox('archive-reaction-error', null); archiveReactionKey = key; drawReactionChart();
   } catch (error) {
@@ -116,37 +121,49 @@ function drawReactionChart() {
   drawFluorescenceChart('reaction-chart', reactionPoints, 'corrected');
   drawFluorescenceChart('archive-raw-chart', archiveReactionPoints, 'raw');
   drawFluorescenceChart('archive-corrected-chart', archiveReactionPoints, 'corrected');
+  for (const [prefix,data] of [['live',liveMelting],['archive',archiveMelting]]) {
+    $(prefix+'-melting').hidden = !data.points.length;
+    $(prefix+'-derivative').hidden = !data.derivative.length;
+    const latest = data.points[data.points.length-1];
+    const detail = latest ? `${data.points.length} melting points · Latest setpoint ${number(latest.temperature)} °C · Measured ${number(latest.measured_c)} °C. ` : '';
+    $(prefix+'-melting-note').textContent = detail+(data.completed ? 'Melting complete. −dF/dT uses finite differences of raw fluorescence against commanded temperature (a.u./°C).' : 'The −dF/dT plot appears after all melting points finish successfully.');
+    drawFluorescenceChart(prefix+'-melting-chart',data.points,'raw','temperature');
+    drawFluorescenceChart(prefix+'-derivative-chart',data.derivative,'derivative','temperature');
+  }
 }
-function drawFluorescenceChart(id, points, field) {
+function drawFluorescenceChart(id, points, field, axis='time_min') {
   const canvas = $(id), bounds = canvas.getBoundingClientRect();
   if (!bounds.width) return;
   const dpr = window.devicePixelRatio || 1, w = bounds.width, h = bounds.height;
   canvas.width = w*dpr; canvas.height = h*dpr;
   const ctx = canvas.getContext('2d'); ctx.scale(dpr,dpr);
   const left = w < 500 ? 64 : 80, right = w-18, top = 30, bottom = h-48;
-  const end = points.reduce((end,p) => Math.max(end,p.time_min),1);
-  let peak = 1;
-  for (const point of points) for (const value of point[field]) peak = Math.max(peak,value);
-  const high = peak*1.1, x = v => left+v/end*(right-left), y = v => bottom-v/high*(bottom-top);
+  const start = axis === 'temperature' && points.length ? Math.min(...points.map(p=>p[axis])) : 0;
+  const end = Math.max(start+1,...points.map(p=>p[axis]));
+  let peak = 1, low = 0;
+  for (const point of points) for (const value of point[field]) { peak = Math.max(peak,value); low = Math.min(low,value); }
+  const high = peak*1.1; low *= 1.1;
+  const x = v => left+(v-start)/(end-start)*(right-left), y = v => bottom-(v-low)/(high-low)*(bottom-top);
   ctx.font = '11px sans-serif'; ctx.fillStyle = '#637468';
-  ctx.fillText(`${field === 'raw' ? 'Raw' : 'Corrected'} fluorescence (a.u.)`, left, 15);
+  ctx.fillText(field === 'derivative' ? '−dF/dT (a.u./°C)' : `${field === 'raw' ? 'Raw' : 'Corrected'} fluorescence (a.u.)`, left, 15);
   for (let i=0; i<=4; i++) {
-    const value = high*i/4;
+    const value = low+(high-low)*i/4;
     ctx.strokeStyle = '#e8ede7'; ctx.beginPath(); ctx.moveTo(left,y(value)); ctx.lineTo(right,y(value)); ctx.stroke();
     const tick = high >= 1000000 ? (value/1000000).toFixed(2)+'M' : high >= 10000 ? (value/1000).toFixed(1)+'k' : Math.round(value).toLocaleString();
     ctx.textAlign = 'right'; ctx.fillText(tick, left-8,y(value)+4);
-    ctx.textAlign = 'center'; ctx.fillText((end*i/4).toFixed(1), x(end*i/4), bottom+20);
+    const tickX = start+(end-start)*i/4;
+    ctx.textAlign = 'center'; ctx.fillText(tickX.toFixed(1), x(tickX), bottom+20);
   }
-  ctx.fillText('Time since first photo (min)', (left+right)/2,h-6);
+  ctx.fillText(axis === 'temperature' ? 'Setpoint temperature (°C)' : 'Time since first photo (min)', (left+right)/2,h-6);
   if (!points.length) {
     ctx.fillText(id === 'reaction-chart' ? 'Waiting for current acquisition' : 'No recorded reaction data', (left+right)/2,(top+bottom)/2); return;
   }
   (reactionRegions?.coordinates || []).forEach((region,i) => {
     ctx.strokeStyle = ctx.fillStyle = region.color; ctx.lineWidth = 2;
-    ctx.beginPath(); points.forEach((p,j) => j ? ctx.lineTo(x(p.time_min),y(p[field][i])) : ctx.moveTo(x(p.time_min),y(p[field][i]))); ctx.stroke();
-    const point = points[points.length-1]; ctx.beginPath(); ctx.arc(x(point.time_min),y(point[field][i]),3,0,2*Math.PI); ctx.fill();
+    ctx.beginPath(); points.forEach((p,j) => j ? ctx.lineTo(x(p[axis]),y(p[field][i])) : ctx.moveTo(x(p[axis]),y(p[field][i]))); ctx.stroke();
+    const point = points[points.length-1]; ctx.beginPath(); ctx.arc(x(point[axis]),y(point[field][i]),3,0,2*Math.PI); ctx.fill();
   });
 }
 const reactionResize = new ResizeObserver(drawReactionChart);
-for (const id of ['reaction-chart','archive-raw-chart','archive-corrected-chart']) reactionResize.observe($(id));
+for (const id of ['reaction-chart','archive-raw-chart','archive-corrected-chart','live-melting-chart','live-derivative-chart','archive-melting-chart','archive-derivative-chart']) reactionResize.observe($(id));
 loadReactionRegions(); pollReaction();

@@ -140,6 +140,17 @@ class Heater:
             self.state.update(active=True, target=target, log=name, duty=0,
                               assay_id=context.get('id'), gains=gains)
 
+    def retarget(self, target):
+        """Advance an assay step without restarting the timer or startup boost."""
+        self.validate(target, 1)
+        with self.lock:
+            if not self.state['active'] or self.state['fault'] or not self.state['ready'] or self.clock()-self.last_sample > 2:
+                raise ValueError('Cannot advance melting temperature without valid active feedback')
+            gains = self.state['gains']
+            self.pid = PID(gains['kp'], gains['ki'], gains['kd'], target)
+            self.startup_phase = None
+            self.state['target'] = target
+
     def clear_fault(self):
         with self.lock:
             if self.state['active'] or not self.state['ready'] or self.clock()-self.last_sample > 2:

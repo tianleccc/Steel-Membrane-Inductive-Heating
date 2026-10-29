@@ -65,7 +65,7 @@ class Camera:
         if isinstance(count, bool) or not isinstance(count,int) or not 1 <= count <= 100000:
             raise ValueError('Photo count must be an integer between 1 and 100000')
 
-    def start(self, interval, count, context=None, deadline=None):
+    def start(self, interval, count, context=None, deadline=None, delay=0, continue_reaction=False):
         self.validate(interval, count)
         context = dict(context or {})
         with self.lock:
@@ -73,10 +73,11 @@ class Camera:
                 raise ValueError('Camera not ready')
             if self.job or self.single or self.state['busy']:
                 raise ValueError('An acquisition job is already running')
-            self.reaction = ReactionSession(self.c)
+            if not continue_reaction or self.reaction is None:
+                self.reaction = ReactionSession(self.c)
             self.cancel.clear()
             self.generation += 1
-            self.job = dict(interval=interval, count=count, next=time.monotonic(),
+            self.job = dict(interval=interval, count=count, next=time.monotonic()+delay,
                             generation=self.generation, context=context, deadline=deadline)
             self.state.update(running=True, captured=0, count=count, interval_s=interval,
                               error=None, assay_id=context.get('id'), reaction_id=self.reaction.id)
@@ -110,6 +111,8 @@ class Camera:
     def save(self, context=None, deadline=None):
         context = dict(context or {})
         folder = self.photos if not context else Path(self.c['data_dir'])/'assays'/context['id']/'photos'
+        if context.get('photo_layout') == 'stages':
+            folder = folder / context.get('stage', 'amplification')
         folder.mkdir(parents=True, exist_ok=True)
         if shutil.disk_usage(folder).free < 250*1024*1024:
             raise RuntimeError('Less than 250 MB of disk space remains. Acquisition stopped.')
@@ -136,14 +139,20 @@ class Camera:
                 meta = dict(id=name, utc=captured_at,
                             temperature=self.temperature(), camera=request.get_metadata(),
                             assay_id=context.get('id'), assay_name=context.get('name'),
-                            operator=context.get('operator'))
+                            operator=context.get('operator'), stage=context.get('stage','amplification'),
+                            setpoint_c=context.get('melting_target',context.get('target')))
                 measurement = None
                 analysis_error = None
                 try:
+                    if meta['stage'] == 'melting' and (meta['temperature'].get('temperature') is None
+                            or meta['temperature'].get('recovering') or meta['temperature'].get('fault')):
+                        raise ValueError('Valid temperature feedback is required for a melting measurement')
                     if self.reaction is None:
                         self.reaction = ReactionSession(self.c)
                     measurement = self.reaction.analyze(folder/(name+'.pending'), name+'.jpg',
                                                         captured_at, context.get('id'), captured_clock)
+                    measurement[0].update(Stage=meta['stage'], Setpoint_C=meta['setpoint_c'] if meta['setpoint_c'] is not None else '',
+                                          Measured_C=meta['temperature'].get('temperature') if meta['temperature'].get('temperature') is not None else '')
                     write_measurement(folder/(name+'.reaction.csv.pending'), measurement[0])
                     (folder/(name+'.reaction.csv.pending')).replace(folder/(name+'.reaction.csv'))
                     meta['reaction_id'] = self.reaction.id

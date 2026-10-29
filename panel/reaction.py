@@ -23,6 +23,8 @@ for region_id in range(1, 5):
                ('Center_X_px', 'Center_Y_px', 'Radius_px', 'Raw', 'Smoothed', 'Background', 'Corrected')]
 LEGACY_FIELDS = list(FIELDS)
 FIELDS += ['Stage', 'Setpoint_C', 'Measured_C']
+STAGE_FIELDS = list(FIELDS)
+FIELDS += ['Temperature_status']
 
 
 def photo_folders(folder):
@@ -82,7 +84,7 @@ class ReactionSession:
             self.first_time = elapsed_s
         row = dict(Image=image_name, UTC=utc, Assay_ID=assay_id or 'unassigned',
                    Reaction_ID=self.id, Time_min=max(0, elapsed_s-self.first_time)/60,
-                   Stage='amplification', Setpoint_C='', Measured_C='',
+                   Stage='amplification', Setpoint_C='', Measured_C='', Temperature_status='unavailable',
                    Method=METHOD, EMA_alpha=ALPHA, HSV_low=','.join(map(str,HSV_LOW)),
                    HSV_high=','.join(map(str,HSV_HIGH)), Width_px=image.shape[1], Height_px=image.shape[0])
         for i, region in enumerate(self.settings['coordinates']):
@@ -116,7 +118,7 @@ def read_rows(folder, stage=None):
             continue  # A pending/incomplete capture is not a published measurement.
         with path.open(newline='', encoding='utf-8') as stream:
             reader = csv.DictReader(stream)
-            if reader.fieldnames not in (FIELDS, LEGACY_FIELDS):
+            if reader.fieldnames not in (FIELDS, STAGE_FIELDS, LEGACY_FIELDS):
                 raise ValueError(f'Invalid reaction log: {path.name}')
             data = list(reader)
         if len(data) != 1 or data[0]['Image'] != photo.name:
@@ -125,6 +127,7 @@ def read_rows(folder, stage=None):
         row.setdefault('Stage', 'amplification')
         row.setdefault('Setpoint_C', '')
         row.setdefault('Measured_C', '')
+        row.setdefault('Temperature_status', 'valid' if row['Measured_C'] != '' else 'unavailable')
         if row['Stage'] not in ('amplification', 'melting'):
             raise ValueError('Invalid reaction stage')
         for key in ['Time_min', 'EMA_alpha', 'Width_px', 'Height_px'] + LEGACY_FIELDS[11:]:

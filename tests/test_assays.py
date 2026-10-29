@@ -97,16 +97,17 @@ class AssayTests(unittest.TestCase):
         self.assertEqual(self.heater.hw.duty,0)
         self.assertEqual(self.manager.archive.records()[0]['status'],'failed')
 
-    def test_sensor_failure_stops_entire_assay(self):
+    def test_sensor_failure_does_not_cancel_assay(self):
         self.start()
         self.heater.sample([])
         self.manager.tick()
         self.assertIsNotNone(self.manager.active)
-        self.now+=self.heater.recovery_timeout+.1
+        self.now+=5.1
         self.heater.output()
         self.manager.tick()
-        self.assertFalse(self.camera.snapshot()['running'])
-        self.assertEqual(self.manager.last['status'],'failed')
+        self.assertTrue(self.camera.snapshot()['running'])
+        self.assertIsNotNone(self.manager.active)
+        self.assertEqual(self.heater.hw.duty,0)
 
     def test_camera_failure_stops_heating(self):
         self.start()

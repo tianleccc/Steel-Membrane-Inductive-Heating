@@ -298,7 +298,7 @@ class Assays:
         record = self.active
         target = record['melting']['targets'][index]
         if index == 0:
-            self.heater.start(target,len(record['melting']['targets'])*90,record['pid'],context=record)
+            self.heater.start(target,len(record['melting']['targets'])*90,record['pid'],context=record,allow_recovery=True)
         else:
             self.heater.retarget(target)
         record.update(stage='melting',melting_index=index,melting_target=target)
@@ -336,7 +336,7 @@ class Assays:
             elif self.active['stage'] == 'transition':
                 if self.clock() >= self.deadline:
                     self.finish('failed','Camera did not stop before melting')
-                elif not c['busy'] and not c['running'] and not c.get('pending') and h['ready']:
+                elif not c['busy'] and not c['running'] and not c.get('pending'):
                     self.melting_step(0)
             elif self.active['stage'] == 'melting':
                 if self.clock() >= self.deadline or not h['active']:
@@ -351,11 +351,8 @@ class Assays:
                         if index == len(record['melting']['targets']):
                             record['melting_completed'] = True
                             self.finish('completed')
-                        elif h['ready']:
-                            self.melting_step(index)
                         else:
-                            # Retry after feedback recovery without counting this photo twice.
-                            record['melting_captured'] -= 1
+                            self.melting_step(index)
             elif self.clock() >= self.deadline:
                 if self.active['melting']:
                     self.begin_transition()

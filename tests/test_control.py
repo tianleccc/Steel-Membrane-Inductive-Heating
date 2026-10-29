@@ -48,18 +48,18 @@ class ControlTests(unittest.TestCase):
         self.assertTrue(self.h.snapshot()['fault'])
         self.assertEqual(self.h.hw.duty,0)
 
-    def test_sensor_failure_latches_and_never_restarts_automatically(self):
+    def test_sensor_failure_pauses_output_and_recovers_without_cancelling_run(self):
         self.h.start(70,300)
         self.h.sample([])
         self.time+=self.h.recovery_timeout+.1
         self.h.output()
-        self.h.sample([(25,23)]*3)
-        self.h.sample([(25,23)]*3)
-        self.assertFalse(self.h.snapshot()['active'])
-        with self.assertRaises(ValueError): self.h.start(70,300)
-        self.h.clear_fault()
-        self.h.start(70,300)
+        self.assertEqual(self.h.hw.duty,0)
         self.assertTrue(self.h.snapshot()['active'])
+        self.assertIsNone(self.h.snapshot()['fault'])
+        self.h.sample([(25,23)]*3)
+        self.h.sample([(25,23)]*3)
+        self.assertTrue(self.h.snapshot()['active'])
+        self.assertGreater(self.h.output(),0)
 
     def test_nan_fails_closed(self):
         self.h.start(70,300)
@@ -80,7 +80,8 @@ class ControlTests(unittest.TestCase):
         self.h.start(70,300)
         self.time+=self.h.recovery_timeout+.1
         self.assertEqual(self.h.output(),0)
-        self.assertTrue(self.h.snapshot()['fault'])
+        self.assertIsNone(self.h.snapshot()['fault'])
+        self.assertTrue(self.h.snapshot()['recovering'])
 
     def test_stop_is_immediate(self):
         self.h.start(70,300)
@@ -158,15 +159,16 @@ class ControlTests(unittest.TestCase):
         self.assertFalse(self.h.snapshot()['recovering'])
         self.assertEqual(deadline,self.h.deadline)
 
-    def test_late_valid_read_cannot_resume_faulted_heating(self):
+    def test_late_valid_read_restores_feedback_without_extending_deadline(self):
         self.h.start(70,300)
         self.h.sensor_error('error')
         self.time+=self.h.recovery_timeout+.1
         self.h.sample([(25,23)]*3)
         self.h.sample([(25,23)]*3)
-        self.assertFalse(self.h.snapshot()['active'])
-        self.assertTrue(self.h.snapshot()['fault'])
-        self.assertEqual(self.h.output(),0)
+        self.assertTrue(self.h.snapshot()['active'])
+        self.assertIsNone(self.h.snapshot()['fault'])
+        self.assertGreater(self.h.output(),0)
+        self.assertEqual(self.h.deadline,310)
 
     def test_mixed_invalid_and_overtemperature_stops_immediately(self):
         self.h.start(70,300)
@@ -174,14 +176,15 @@ class ControlTests(unittest.TestCase):
         self.assertFalse(self.h.snapshot()['active'])
         self.assertIn('cutoff',self.h.snapshot()['fault'])
 
-    def test_repeated_bad_batches_do_not_extend_recovery_window(self):
+    def test_repeated_bad_batches_keep_output_off_without_cancelling_run(self):
         self.h.start(70,300)
         for i in range(1,11):
             self.time=10+i*.5
             self.h.sensor_error('error')
             self.h.output()
-        self.assertFalse(self.h.snapshot()['active'])
-        self.assertTrue(self.h.snapshot()['fault'])
+        self.assertTrue(self.h.snapshot()['active'])
+        self.assertIsNone(self.h.snapshot()['fault'])
+        self.assertEqual(self.h.hw.duty,0)
 
     def test_recovery_after_three_seconds_is_allowed_with_output_off(self):
         self.h.start(70,300)
@@ -214,3 +217,27 @@ class ControlTests(unittest.TestCase):
         self.h.state['filtered']=64.5
         self.h.sample([(64.5,23)]*3)
         self.assertAlmostEqual(self.h.state['duty'],5)
+
+    def test_expiry_or_manual_stop_during_recovery_never_auto_restarts(self):
+        for stopped in (False,True):
+            self.h.sample([(25,23)]*3)
+            self.h.start(70,20)
+            self.h.sensor_error('Disconnected')
+            if stopped:
+                self.h.stop()
+            else:
+                self.time+=21
+            self.assertEqual(self.h.output(),0)
+            self.h.sample([(25,23)]*3); self.h.sample([(25,23)]*3)
+            self.assertFalse(self.h.snapshot()['active'])
+            self.assertEqual(self.h.output(),0)
+
+    def test_overtemperature_during_recovery_remains_latched_after_valid_samples(self):
+        self.h.start(70,300)
+        self.h.sensor_error('Disconnected')
+        self.time+=30
+        self.h.sample([(111,23)]*3)
+        self.h.sample([(25,23)]*3); self.h.sample([(25,23)]*3)
+        self.assertFalse(self.h.snapshot()['active'])
+        self.assertIn('cutoff',self.h.snapshot()['fault'])
+        self.assertEqual(self.h.output(),0)

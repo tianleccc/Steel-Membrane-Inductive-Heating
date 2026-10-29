@@ -179,6 +179,23 @@ class MeltingTests(unittest.TestCase):
         self.assertFalse(self.manager.last['melting_completed'])
         with self.assertRaises(ValueError): self.heater.retarget(41)
 
+    def test_sensor_retries_do_not_abort_transition_or_next_melting_step(self):
+        self.begin()
+        self.heater.sensor_error('CRC error')
+        self.post('assays/skip'); self.manager.tick()
+        self.assertEqual(self.manager.active['stage'],'melting')
+        self.assertTrue(self.heater.snapshot()['recovering'])
+        self.assertEqual(self.heater.output(),0)
+        self.now+=61
+        self.done_photo()
+        self.assertEqual(self.manager.active['melting_index'],1)
+        self.assertEqual(self.heater.output(),0)
+        self.assertIsNone(self.heater.snapshot()['fault'])
+        self.heater.sample([(25,23)]*3)
+        self.assertEqual(self.heater.output(),0)
+        self.heater.sample([(25,23)]*3)
+        self.assertGreater(self.heater.output(),0)
+
 
 class DerivativeTests(unittest.TestCase):
     def test_nonuniform_gradient_sign_no_amplification_baseline_and_completion_gate(self):

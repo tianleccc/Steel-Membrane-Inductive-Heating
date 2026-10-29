@@ -4,7 +4,7 @@
   <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
   <meta name="panel-token" content="{{ token }}">
   <title>Steel Membrane · Instrument Panel</title>
-  <link rel="stylesheet" href="/static/style.css?v=melting-2">
+  <link rel="stylesheet" href="/static/style.css?v=recovery-1">
 </head>
 <body>
   <header><a class="brand" href="/"><span class="mark">S<span>M</span></span><span>STEEL MEMBRANE<small>Imaging & induction heating</small></span></a><div class="header-right"><span id="connection" class="pill">Connecting</span><button id="stop-all" class="danger">■ Stop all</button></div></header>
@@ -37,7 +37,7 @@
           <p class="hint">After amplification: set each temperature, wait 60 seconds from the command, then capture. Includes start and end points; the final increment may be smaller. Actual temperature is recorded with each photo.</p>
         </div></fieldset><div class="assay-actions"><p id="assay-plan">First photo immediately. Uses the PID settings below.</p><button id="start-assay" class="primary" type="submit">Start assay →</button><button id="skip-amplification" class="primary" type="button" hidden>Skip → Melting curve</button><button id="stop-assay" class="secondary" type="button" disabled>Stop assay</button></div></form>
         <div id="assay-run" hidden><strong id="assay-run-name"></strong><span id="assay-run-detail"></span><progress id="assay-progress" max="1" value="0"></progress></div>
-        <p class="hint">Time starts when you press Start assay, including heating up. Heating and acquisition stop together at the end or if either instrument fails. Runs continue if the browser is closed.</p>
+        <p class="hint">Time starts when you press Start assay, including heating up. Sensor read errors retry automatically without cancelling the assay. Stop, overtemperature, or fatal instrument failure ends the run. Runs continue if the browser is closed.</p>
         <div id="assay-error" class="inline-error" hidden></div>
       </article>
       <datalist id="operator-names"></datalist>
@@ -65,7 +65,7 @@
           </div><p class="hint">Applies to the next heating run or assay. PID adjusts output automatically between 0 and 100%.</p></fieldset>
           <p id="pid-used" class="hint" hidden></p>
           <div class="heat-actions"><button id="start-heat" class="primary" type="submit">Start heating →</button><button id="stop-heat" type="button" class="secondary">Stop heating</button></div></form>
-          <p class="hint">{{ cutoff }} °C cutoff · Automatic stop on sensor failure<br>Heating and acquisition run independently. Closing the browser does not stop active jobs.</p><div id="heater-error" class="inline-error" hidden></div><button id="reset" class="text-button">Clear heating fault</button>
+          <p class="hint">{{ cutoff }} °C cutoff · Sensor errors retry automatically (output off until valid feedback)<br>Heating and acquisition run independently. Closing the browser does not stop active jobs.</p><div id="heater-error" class="inline-error" hidden></div><button id="reset" class="text-button">Clear heating fault</button>
         </article>
       </div>
       <article id="reaction-card" class="card reaction-card">
@@ -129,6 +129,6 @@
   </main>
   <footer><span>STEEL MEMBRANE / LAB INSTRUMENTS</span><span>Local acquisition · Traceable records</span></footer>
   <dialog id="photo-dialog"><div class="dialog-head"><span id="photo-title"></span><button id="close-photo" class="secondary">Close ×</button></div><img id="full-photo" alt="Archived photo"><div class="dialog-foot"><button id="previous-photo" class="secondary">← Previous photo</button><button id="delete-photo" class="danger">Delete photo</button><a id="download-photo" class="primary" download>Download original ↓</a><button id="next-photo" class="secondary">Next photo →</button></div></dialog>
-  <script src="/static/app.js?v=melting-2" defer></script>
-  <script src="/static/reaction.js?v=melting-2" defer></script>
+  <script src="/static/app.js?v=recovery-1" defer></script>
+  <script src="/static/reaction.js?v=recovery-1" defer></script>
 </body></html>

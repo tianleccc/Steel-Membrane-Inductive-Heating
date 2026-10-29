@@ -160,9 +160,31 @@ class ReactionArchiveTests(unittest.TestCase):
         self.camera.cam=SimpleNamespace(capture_request=lambda:request,close=lambda:None)
         self.camera.led=SimpleNamespace(on=lambda:None,off=lambda:None,close=lambda:None)
         with patch('panel.camera.write_measurement',side_effect=OSError('CSV write failed')):
-            with self.assertRaisesRegex(RuntimeError,'Photo saved, but reaction analysis failed'):
-                self.camera.save()
+            self.assertTrue(self.camera.save())
         photo=self.camera.photos/(self.camera.snapshot()['latest']+'.jpg')
         self.assertEqual(photo.read_bytes(),source.read_bytes())
         self.assertIn('CSV write failed',json.loads(photo.with_suffix('.json').read_text())['reaction_error'])
+        self.assertIn('Acquisition continues',self.camera.snapshot()['warning'])
+        self.assertIsNone(self.camera.snapshot()['error'])
         self.assertEqual(read_rows(self.manager.archive.root),[])
+
+    def test_melting_photo_with_missing_temperature_keeps_fluorescence(self):
+        record=self.manager.archive.create(dict(name='Missing temperature',operator='Test',status='running'))
+        record.update(photo_layout='stages',stage='melting',melting_target=65)
+        source=Path(self.tmp.name)/'source.jpg'
+        cv2.imwrite(str(source),np.full((2592,4608,3),(0,120,0),np.uint8))
+        picture=SimpleNamespace(thumbnail=lambda size:None,
+                                save=lambda path,*args,**kwargs:Path(path).write_bytes(b'thumbnail'))
+        request=SimpleNamespace(save=lambda stream,path,**kwargs:shutil.copyfile(source,path),
+                                make_image=lambda stream:picture,get_metadata=lambda:{},release=lambda:None)
+        self.camera.cam=SimpleNamespace(capture_request=lambda:request,close=lambda:None)
+        self.camera.led=SimpleNamespace(on=lambda:None,off=lambda:None,close=lambda:None)
+        self.heater.sensor_error('PEC mismatch')
+        self.assertTrue(self.camera.save(record))
+        rows=read_rows(self.manager.archive.folder(record['id']))
+        self.assertEqual(len(rows),1)
+        self.assertEqual(rows[0]['Measured_C'],'')
+        self.assertEqual(rows[0]['Temperature_status'],'unavailable')
+        self.assertEqual(rows[0]['Setpoint_C'],65)
+        self.assertGreater(rows[0]['Raw_Region_1'],0)
+        self.assertIsNone(self.camera.snapshot()['error'])

@@ -25,7 +25,7 @@ class Camera:
         self.job = None
         self.single = False
         self.reaction = None
-        self.state = dict(ready=False, error=None, preview_light=False, running=False,
+        self.state = dict(ready=False, error=None, warning=None, analysis_warnings=0, preview_light=False, running=False,
                           captured=0, count=0, interval_s=30, latest=None, busy=False,
                           assay_id=None, reaction_id=None)
         self.photos = Path(config['data_dir'])/'photos'
@@ -75,6 +75,7 @@ class Camera:
                 raise ValueError('An acquisition job is already running')
             if not continue_reaction or self.reaction is None:
                 self.reaction = ReactionSession(self.c)
+                self.state.update(warning=None,analysis_warnings=0)
             self.cancel.clear()
             self.generation += 1
             self.job = dict(interval=interval, count=count, next=time.monotonic()+delay,
@@ -94,7 +95,7 @@ class Camera:
             self.reaction = ReactionSession(self.c)
             self.cancel.clear()
             self.single = True
-            self.state.update(assay_id=None, error=None, reaction_id=self.reaction.id)
+            self.state.update(assay_id=None, error=None, warning=None, analysis_warnings=0, reaction_id=self.reaction.id)
 
     def stop(self):
         # Wake warmup immediately; generation prevents a stopped job being revived.
@@ -143,22 +144,24 @@ class Camera:
                             setpoint_c=context.get('melting_target',context.get('target')))
                 measurement = None
                 analysis_error = None
+                temperature = meta['temperature']
+                temperature_valid = (temperature.get('ready',True) and not temperature.get('recovering')
+                                     and not temperature.get('fault') and temperature.get('temperature') is not None)
+                meta['temperature_status'] = 'valid' if temperature_valid else 'unavailable'
                 try:
-                    if meta['stage'] == 'melting' and (meta['temperature'].get('temperature') is None
-                            or meta['temperature'].get('recovering') or meta['temperature'].get('fault')):
-                        raise ValueError('Valid temperature feedback is required for a melting measurement')
                     if self.reaction is None:
                         self.reaction = ReactionSession(self.c)
                     measurement = self.reaction.analyze(folder/(name+'.pending'), name+'.jpg',
                                                         captured_at, context.get('id'), captured_clock)
                     measurement[0].update(Stage=meta['stage'], Setpoint_C=meta['setpoint_c'] if meta['setpoint_c'] is not None else '',
-                                          Measured_C=meta['temperature'].get('temperature') if meta['temperature'].get('temperature') is not None else '')
+                                          Measured_C=temperature['temperature'] if temperature_valid else '',
+                                          Temperature_status=meta['temperature_status'])
                     write_measurement(folder/(name+'.reaction.csv.pending'), measurement[0])
                     (folder/(name+'.reaction.csv.pending')).replace(folder/(name+'.reaction.csv'))
                     meta['reaction_id'] = self.reaction.id
                 except Exception as error:
-                    # Keep the original observation even when analysis fails. Never
-                    # display a fabricated zero or continue a partially logged run.
+                    # Preserve the observation and mark the missing analysis explicitly;
+                    # an analysis error must not cancel the physical experiment.
                     analysis_error = error
                     meta['reaction_error'] = str(error)
                 (folder/(name+'.json.pending')).write_text(json.dumps(meta,default=str),encoding='utf-8')
@@ -168,7 +171,10 @@ class Camera:
                     self.state['latest'] = name
                     self.state['reaction_id'] = self.reaction.id if self.reaction else None
                 if analysis_error:
-                    raise RuntimeError(f'Photo saved, but reaction analysis failed: {analysis_error}') from analysis_error
+                    with self.lock:
+                        self.state['analysis_warnings'] += 1
+                        self.state['warning'] = f'Photo saved; fluorescence data missing for {name}: {analysis_error}. Acquisition continues.'
+                    return True
                 self.reaction.commit(measurement)
                 return True
             finally:

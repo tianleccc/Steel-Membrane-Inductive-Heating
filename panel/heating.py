@@ -107,19 +107,20 @@ class Heater:
             raise ValueError('PID gains must be between 0 and 1000, with at least one nonzero gain')
         return dict(gains)
 
-    def start(self, target, duration, gains=None, context=None):
+    def start(self, target, duration, gains=None, context=None, allow_recovery=False):
         gains = self.validate(target, duration, gains)
         context = dict(context or {})
         with self.lock:
             if not self.state['enabled']:
                 raise ValueError('Heating is disabled. Check the wiring and enable it in config.json.')
-            if not self.state['ready'] or self.clock()-self.last_sample > 2:
+            paused = allow_recovery and self.state['recovering']
+            if not paused and (not self.state['ready'] or self.clock()-self.last_sample > 2):
                 raise ValueError('Temperature sensor is not ready or its readings are stale')
             if self.state['fault']:
                 raise ValueError('Resolve the fault first, then select Clear heating fault')
             if self.state['active']:
                 raise ValueError('Heating is already active. Stop it first.')
-            if self.state['temperature'] >= self.c['cutoff_c']:
+            if self.state['temperature'] is not None and self.state['temperature'] >= self.c['cutoff_c']:
                 raise ValueError('Temperature exceeds the safety cutoff')
             folder = Path(self.c['data_dir'])
             if context:
@@ -135,7 +136,7 @@ class Heater:
             self.pid = PID(gains['kp'], gains['ki'], gains['kd'], target)
             self.context = context
             self.deadline = self.clock()+duration
-            self.startup_phase = ('pending' if self.c.get('startup_pulse', False)
+            self.startup_phase = ('pending' if not paused and self.c.get('startup_pulse', False)
                                   and self.state['filtered'] < target else None)
             self.state.update(active=True, target=target, log=name, duty=0,
                               assay_id=context.get('id'), gains=gains)
@@ -144,8 +145,10 @@ class Heater:
         """Advance an assay step without restarting the timer or startup boost."""
         self.validate(target, 1)
         with self.lock:
-            if not self.state['active'] or self.state['fault'] or not self.state['ready'] or self.clock()-self.last_sample > 2:
+            if not self.state['active'] or self.state['fault']:
                 raise ValueError('Cannot advance melting temperature without valid active feedback')
+            if not self.state['ready'] or self.clock()-self.last_sample > 2:
+                self.sensor_error('Temperature feedback unavailable at step change; output off while retrying')
             gains = self.state['gains']
             self.pid = PID(gains['kp'], gains['ki'], gains['kd'], target)
             self.startup_phase = None
@@ -185,8 +188,6 @@ class Heater:
                     self.state['target'], 0, self.context.get('id',''), '', '',
                     self.pid.kp, self.pid.ki, self.pid.kd, 'retrying', str(message)])
                 self.log.flush()
-            if self.clock()-self.last_sample >= self.recovery_timeout:
-                self._stop(f'Temperature feedback did not recover within {self.recovery_timeout:g} seconds. Heating is latched off.')
 
     def sample(self, readings):
         """Every sample must be valid; cutoff checks raw peaks before smoothing."""
@@ -200,8 +201,6 @@ class Heater:
                 return
             recovered = self.state['recovering']
             if recovered:
-                if self.clock()-self.last_sample >= self.recovery_timeout and self.state['active']:
-                    self._stop(f'Temperature feedback did not recover within {self.recovery_timeout:g} seconds. Heating is latched off.')
                 self.good_batches += 1
                 if self.good_batches < 2:
                     self._off()
@@ -253,9 +252,6 @@ class Heater:
                 return 0
             if self.clock() >= self.deadline:
                 self._stop()
-                return 0
-            if self.clock()-self.last_sample >= self.recovery_timeout:
-                self._stop('Temperature reading timed out')
                 return 0
             if self.clock()-self.last_sample >= 2 and not self.state['recovering']:
                 self.sensor_error('Temperature sample stale; output off while retrying')

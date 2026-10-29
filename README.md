@@ -125,7 +125,7 @@ Heating and timed acquisition operate independently. **Closing the browser does 
 1. In **Run an assay**, enter an assay name and operator name, total duration in **minutes**, target temperature, and photo interval in **seconds**.
 2. Adjust **PID settings** in the infrared heating module if needed. These gains apply to the next independent heating run or assay; they cannot be changed during an active run.
 3. Select **Start assay**. The duration includes heating up; the clock does not wait for the target temperature. The first capture is scheduled immediately, followed by captures at the selected interval while time remains. The illumination warmup and camera processing may delay a capture; missed intervals are not replayed.
-4. Heating and acquisition stop together at the end of the assay. **Stop assay** and **Stop all** end the run early without deleting saved data. A camera or temperature-control fault also ends the assay and records the failure reason.
+4. Heating and acquisition stop together at the end of the assay. **Stop assay** and **Stop all** end the run early without deleting saved data. An overtemperature event or fatal instrument failure ends the assay and records the failure reason; recoverable sensor and per-photo analysis errors do not.
 5. Open **Photo archive**, select an operator or search by assay name, and open an assay folder. **View temperature logs** opens the corresponding CSV records.
 
 One named assay owns one folder. Assay names must be unique across operators;
@@ -169,7 +169,21 @@ The editable PID controls start with the device defaults: `Kp=50`, `Ki=0.1`, and
 
 With `startup_pulse: true` (the default), each heating run or assay starts with GPIO HIGH for approximately 0.1 seconds, LOW for at least 1 second, and HIGH for approximately 0.1 seconds before returning to PID control. Timing follows the control loop and includes sensor I/O latency. The sequence counts toward the run duration and only runs when the measured temperature is below the target. Stop, expiry, overtemperature, or invalid/stale feedback interrupt it; sensor recovery does not replay it. Set `startup_pulse` to `false` in `config.json` to disable this experimental startup workaround. It does not replace proper gate driving or reproduce disconnecting a floating gate.
 
-A temporary sensor read error or invalid reading immediately sets heating output to zero and opens a recovery window ending 5 seconds after the last accepted batch (device setting `sensor_recovery_s`, allowed range 2–10 seconds). Two consecutive valid batches within that window restore temperature feedback and continue the same run without extending its timer. Assays and photo capture continue during this brief output-off period. Persistent errors or stale feedback latch heating off; a raw sample reaching the default **110 °C** cutoff always latches off immediately, even if other samples in the batch are invalid. CSV columns `sample_status` and `sensor_error` record retry and recovery events; no invalid temperature is used for PID control. Once valid readings return and the temperature is below the cutoff, clear the fault manually before starting another run. Cutoff detection checks individual raw readings before median/EMA filtering. PID gains can be configured before a run, from 0 to 1000 each, with at least one nonzero gain. The PID avoids accumulating integral when output is saturated. The configured minimum duty tapers linearly to zero within 3 °C below the target, retaining its full floor farther below target. Output slew remains in the device configuration; final output never exceeds 100%. Old `duty_cap` entries in local configuration are ignored.
+Sensor read errors, checksum errors, and stale feedback immediately set heating
+output to zero while the same timed run and photo acquisition continue. There is
+no five-second latched sensor fault: two consecutive valid batches restore
+feedback and PID automatically, without extending the original deadline or
+replaying the startup pulse. The old `sensor_recovery_s` setting is retained for
+configuration compatibility but no longer cancels an assay. Stop and timer expiry
+still end the run even while feedback is unavailable. A raw sample reaching the
+**110 °C** cutoff always latches heating off and ends the assay; valid later
+readings cannot automatically restart an overtemperature-stopped run.
+CSV `sample_status` and `sensor_error` retain retry/recovery events. Missing
+temperature at photo time does not prevent fluorescence analysis: the reaction
+CSV has an empty `Measured_C` and `Temperature_status=unavailable`, rather than a
+stale or invented reading. Melting steps continue on the commanded schedule;
+missing feedback can affect actual thermal exposure, so the CSV preserves it.
+Cutoff detection checks individual raw readings before median/EMA filtering. PID gains can be configured before a run, from 0 to 1000 each, with at least one nonzero gain. The PID avoids accumulating integral when output is saturated. The configured minimum duty tapers linearly to zero within 3 °C below the target, retaining its full floor farther below target. Output slew remains in the device configuration; final output never exceeds 100%. Old `duty_cap` entries in local configuration are ignored.
 
 The legacy `temp.py` software emissivity correction was incorrect for emissivity values other than 1. This implementation uses the MLX90614's reported temperature directly and does not modify its EEPROM. This matches the legacy behavior with software emissivity set to 1. Infrared measurements of metal depend on surface emissivity, reflected radiation, and the sensor's field of view; validate the measurements and tune the PID after installing the sensor.
 
@@ -293,8 +307,9 @@ Clearing temperature logs never removes reaction data. Deleting an earlier
 photo does not recalculate the remaining historical EMA values.
 
 If analysis fails, the original photo is retained with `reaction_error` in its
-JSON metadata and acquisition stops with a visible error instead of recording
-a false zero. Install OpenCV on existing Pi installations with
+JSON metadata. A visible warning reports the missing fluorescence row and
+acquisition continues; no false zero is recorded. Fatal camera/storage failures
+that prevent saving photos still stop the assay. Install OpenCV on existing Pi installations with
 `sudo apt-get install python3-opencv`; `scripts/install.sh` includes this
 dependency for new installations (the venv uses system site packages).
 
@@ -358,7 +373,7 @@ Without melting enabled, the assay still ends after amplification as before.
 Melting includes both endpoints (the last increment can be smaller). Each setpoint
 command starts a 60-second wait, followed by illumination warmup and one photo.
 This is a timed protocol, not a wait for thermal equilibrium. A point fails closed
-if capture/analysis has not completed within 90 seconds; all points together must
+if capture has not completed within 90 seconds; all points together must
 fit the configured maximum heating duration. Existing cutoff and sensor-fault
 protection apply throughout; Stop and service restart never resume heating.
 

@@ -54,7 +54,8 @@ async function status() {
     $('temp').textContent = number(h.temperature);
     $('ambient').textContent = number(h.ambient) + ' °C';
     $('duty').textContent = number(h.duty, 0) + ' %';
-    $('remaining').textContent = h.active ? duration(h.remaining_s) : '—';
+    $('remaining-label').textContent = active?.stage === 'melting' ? 'Melting remaining (est.)' : active?.stage === 'amplification' ? 'Amplification remaining' : 'Time remaining';
+    $('remaining').textContent = active?.stage === 'transition' ? 'Switching to melting' : active ? duration(a.stage_remaining_s) : h.active ? duration(h.remaining_s) : '—';
     badge('heater-status', h.recovering && !h.fault ? 'Retrying sensor · Output off' : h.active ? 'Heating' : h.fault ? 'Fault · Output off' : h.ready ? 'Standby' : 'Sensor not ready', h.fault ? 'error' : h.ready ? 'ok' : '');
     badge('camera-status', c.ready ? (c.running ? 'Acquiring' : 'Camera ready') : 'Camera not ready', c.ready ? 'ok' : 'error');
     errorBox('heater-error', h.fault || h.warning || (!h.enabled ? 'After checking the wiring, enable heating in the device configuration.' : null));
@@ -65,7 +66,8 @@ async function status() {
     $('light').disabled = !c.ready || !!active;
     $('stop-heat').disabled = $('stop-camera').disabled = !!active;
     $('pid-fields').disabled = h.active || !!active;
-    $('reset').disabled = !!active;
+    $('reset').hidden = !h.fault?.includes('cutoff');
+    $('reset').disabled = !!active || !h.ready;
     $('pid-used').hidden = !h.active;
     if (h.active) $('pid-used').textContent = `Running PID: Kp ${h.gains.kp} · Ki ${h.gains.ki} · Kd ${h.gains.kd}`;
     $('progress').max = c.count || 1;
@@ -311,11 +313,11 @@ $('archive-operator').onchange = renderFolders;
 $('assay-search').oninput = () => { clearTimeout(searchTimer); searchTimer = setTimeout(renderFolders, 150); };
 $('folder-logs').onclick = async () => { showTab('logs'); await refreshCatalog(); $('log-operator').value = ''; updateLogOptions(); $('log-assay').value = selectedAssay; await loadLogs(); };
 async function deleteItem(kind, assayId, name, label) {
-  if (!confirm(`Move ${label} to Trash?${kind === 'assay' ? ' All photos and logs in this assay will be moved together.' : ''} You can undo this deletion.`)) return false;
+  if (!confirm(kind === 'assay' ? `Permanently delete ${label}, including all photos and logs? This frees storage and cannot be undone.` : `Move ${label} to Trash? You can undo this deletion.`)) return false;
   try {
     const result = await api('archive/delete', {kind, assay_id: assayId, name});
-    lastTrash = result.trash_id; $('undo-bar').hidden = false;
-    notify('Moved to Trash. Use Undo deletion to restore.');
+    lastTrash = result.trash_id; $('undo-bar').hidden = !lastTrash;
+    notify(kind === 'assay' ? 'Assay permanently deleted. Storage released.' : 'Moved to Trash. Use Undo deletion to restore.');
     return true;
   } catch (error) { notify(error.message); return false; }
 }

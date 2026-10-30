@@ -175,6 +175,24 @@ def melting_series(rows, completed=False):
                    temperature=r['Setpoint_C'], measured_c=r['Measured_C'],
                    raw=[r[f'Raw_Region_{i}'] for i in range(1,5)])
               for r in rows if r['Stage'] == 'melting' and r['Setpoint_C'] != '']
+    # Local quadratic least squares on actual setpoints (also handles a short
+    # final increment). Five observations, centered inside, one-sided at edges.
+    # Keep short traces unchanged; never replace the immutable raw CSV values.
+    if len(points) >= 5:
+        import numpy as np
+        temperatures = np.array([p['temperature'] for p in points])
+        if np.any(np.diff(temperatures) <= 0):
+            raise ValueError('Melting temperatures must increase')
+        raw = np.array([p['raw'] for p in points])
+        for j,point in enumerate(points):
+            left = min(max(0,j-2),len(points)-5)
+            x = temperatures[left:left+5]-temperatures[j]
+            x = x/max(abs(x))
+            coefficients = np.linalg.lstsq(np.column_stack([np.ones(5),x,x*x]),raw[left:left+5],rcond=None)[0]
+            point['smoothed'] = coefficients[0].tolist()
+    else:
+        for point in points:
+            point['smoothed'] = list(point['raw'])
     derivative = []
     if completed and len(points) >= 2:
         for j, point in enumerate(points):
@@ -183,13 +201,13 @@ def melting_series(rows, completed=False):
             if span <= 0:
                 raise ValueError('Melting temperatures must increase')
             # One-sided differences at endpoints, nonuniform three-point gradient inside.
-            values = [(a-b)/span for a,b in zip(left['raw'],right['raw'])]
+            values = [(a-b)/span for a,b in zip(left['smoothed'],right['smoothed'])]
             if 0 < j < len(points)-1:
                 a = point['temperature']-left['temperature']
                 b = right['temperature']-point['temperature']
                 if a <= 0 or b <= 0:
                     raise ValueError('Melting temperatures must increase')
                 values = [(b*(l-m)/a+a*(m-r)/b)/(a+b)
-                          for l,m,r in zip(left['raw'],point['raw'],right['raw'])]
+                          for l,m,r in zip(left['smoothed'],point['smoothed'],right['smoothed'])]
             derivative.append(dict(temperature=point['temperature'], derivative=values))
     return dict(points=points, derivative=derivative, completed=completed)

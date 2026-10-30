@@ -130,8 +130,7 @@ Heating and timed acquisition operate independently. **Closing the browser does 
 
 One named assay owns one folder. Assay names must be unique across operators;
 case, repeated/outer whitespace and equivalent Unicode forms do not create a
-new name. Names in recoverable deleted assay folders are also reserved so an
-undo cannot introduce duplicates. Duplicate names are rejected before creating
+new name. Deleted assay names are immediately reusable. Duplicate names are rejected before creating
 a folder or starting either instrument. Each run also gets a unique internal ID.
 The manifest stores the name, operator, target, duration, interval, PID gains,
 start/end times and run status. Operator names are searchable labels, not
@@ -159,9 +158,9 @@ Service restarts do not resume assays. Runs that were active are marked **interr
 
 - Open a photo and choose **Delete photo** to remove its original, thumbnail, and metadata together.
 - Choose **Delete** beside a temperature log to remove that CSV, or **Delete assay folder** to remove an entire assay and its data.
-- Each action asks for confirmation and moves data into `data/.trash/`, rather than permanently erasing it. Running assays and files still being written cannot be deleted.
-- Use **Undo deletion** to restore the most recently deleted item in the current page session. Restore does not overwrite existing files. To restore several earlier deletions after a page reload, the retained `.trash/<deletion-id>/manifest.json` records each original path and the stored file names for manual recovery.
-- Trash is retained without automatic purging, so deletion does not immediately reclaim disk space. Include it in backups if recovery is needed.
+- Assay folder deletion asks for confirmation, then permanently removes all photos and logs and frees storage. It has no Undo. Running assays and files still being written cannot be deleted.
+- Individual photo and temperature-log deletions still use Trash. Use **Undo deletion** to restore the most recently deleted file in the current page session. Restore does not overwrite existing files. To restore several earlier deletions after a page reload, the retained `.trash/<deletion-id>/manifest.json` records each original path and the stored file names for manual recovery.
+- Old deleted-assay trash is purged during this update. Individual-file Trash is retained; deleting the whole assay also removes its separately trashed files.
 
 ## Temperature control and protection
 
@@ -379,8 +378,8 @@ protection apply throughout; Stop and service restart never resume heating.
 
 The Workspace shows the current assay's amplification and live melting data.
 After all melting points complete, it also shows **−dF/dT**: finite differences
-of raw fluorescence against commanded temperature, with one-sided endpoints and
-a nonuniform three-point interior gradient. Melting uses neither amplification's
+of five-point local-quadratic smoothed fluorescence against commanded temperature, with one-sided endpoints and
+a nonuniform three-point interior gradient. Smoothing fits actual temperatures, including a short final increment; traces shorter than five points stay unsmoothed. Raw CSV data is unchanged. Melting uses neither amplification's
 EMA nor its running-minimum baseline correction. An interrupted sweep has no
 completed derivative plot. The same plots are available in its archive folder.
 
@@ -419,3 +418,5 @@ The panel is intended for a trusted local network and does not provide user logi
 - [Raspberry Pi camera connection documentation](https://www.raspberrypi.com/documentation/accessories/camera.html)
 - [Official Picamera2 manual](https://datasheets.raspberrypi.com/camera/picamera2-manual.pdf)
 - [Melexis MLX90614 datasheet](https://www.melexis.com/-/media/files/documents/datasheets/mlx90614-datasheet-melexis.pdf)
+
+The temperature card displays the current phase: amplification remaining time, or estimated melting time including all remaining points and illumination warmup. The assay badge separately shows time to the next melting photo. Capture/analysis overhead can extend the estimate. The old generic Clear heating fault button is removed; only an actual latched overtemperature exposes Acknowledge overtemperature after cooling. Missing sensor feedback still holds output at zero and automatically recovers without cancelling the assay.

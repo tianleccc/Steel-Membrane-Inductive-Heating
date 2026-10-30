@@ -4,7 +4,7 @@
   <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
   <meta name="panel-token" content="{{ token }}">
   <title>Steel Membrane · Instrument Panel</title>
-  <link rel="stylesheet" href="/static/style.css?v=recovery-1">
+  <link rel="stylesheet" href="/static/style.css?v=refine-1">
 </head>
 <body>
   <header><a class="brand" href="/"><span class="mark">S<span>M</span></span><span>STEEL MEMBRANE<small>Imaging & induction heating</small></span></a><div class="header-right"><span id="connection" class="pill">Connecting</span><button id="stop-all" class="danger">■ Stop all</button></div></header>
@@ -53,7 +53,7 @@
         </article>
         <article class="card heating"><div class="card-head"><div><span class="eyebrow">02 / TEMPERATURE</span><h2>Infrared heating</h2></div><span id="heater-status" class="pill">Initializing</span></div>
           <div class="temperature"><span id="temp">—</span><span>°C</span></div><div class="temp-caption">MLX90614 · Object temperature</div>
-          <div class="metrics"><div><span>Ambient temperature</span><strong id="ambient">— °C</strong></div><div><span>Duty cycle</span><strong id="duty">0 %</strong></div><div><span>Time remaining</span><strong id="remaining">—</strong></div></div>
+          <div class="metrics"><div><span>Ambient temperature</span><strong id="ambient">— °C</strong></div><div><span>Duty cycle</span><strong id="duty">0 %</strong></div><div><span id="remaining-label">Time remaining</span><strong id="remaining">—</strong></div></div>
           <div class="chart-wrap"><canvas id="chart" aria-label="Recent temperature trend"></canvas><span class="chart-label">Last 10 minutes · °C</span></div>
           <form id="heat-form"><div class="heat-fields">
             <label>Target temperature<div class="unit-input"><input id="target" type="number" min="1" max="{{ cutoff - 0.1 }}" step="0.1" value="50" required><span>°C</span></div></label>
@@ -65,7 +65,7 @@
           </div><p class="hint">Applies to the next heating run or assay. PID adjusts output automatically between 0 and 100%.</p></fieldset>
           <p id="pid-used" class="hint" hidden></p>
           <div class="heat-actions"><button id="start-heat" class="primary" type="submit">Start heating →</button><button id="stop-heat" type="button" class="secondary">Stop heating</button></div></form>
-          <p class="hint">{{ cutoff }} °C cutoff · Sensor errors retry automatically (output off until valid feedback)<br>Heating and acquisition run independently. Closing the browser does not stop active jobs.</p><div id="heater-error" class="inline-error" hidden></div><button id="reset" class="text-button">Clear heating fault</button>
+          <p class="hint">{{ cutoff }} °C cutoff · Sensor errors retry automatically (output off until valid feedback)<br>Heating and acquisition run independently. Closing the browser does not stop active jobs.</p><div id="heater-error" class="inline-error" hidden></div><button id="reset" class="text-button" hidden>Acknowledge overtemperature</button>
         </article>
       </div>
       <article id="reaction-card" class="card reaction-card">
@@ -73,7 +73,7 @@
         <div id="reaction-legend" class="reaction-legend"></div>
         <div class="reaction-chart-wrap"><canvas id="reaction-chart" role="img" aria-label="Background-corrected fluorescence for Region 1 to Region 4 versus elapsed minutes"></canvas></div>
         <section id="live-melting" hidden class="melting-plots">
-          <h3>Melting curve · Raw fluorescence</h3><p class="hint">Region 1–4 use the colors above. Temperature axis shows commanded setpoints; measured temperatures are saved in CSV. No amplification baseline subtraction or EMA smoothing is applied.</p>
+          <h3>Melting curve · Smoothed fluorescence</h3><p class="hint">Region 1–4 use the colors above. Temperature axis shows commanded setpoints; measured temperatures are saved in CSV. Five-point local quadratic smoothing is applied before differentiation (fewer than five points remain unsmoothed). Original raw values stay in CSV.</p>
           <div class="reaction-chart-wrap"><canvas id="live-melting-chart" role="img" aria-label="Melting fluorescence versus setpoint temperature"></canvas></div>
           <div id="live-derivative" hidden><h3>Melting peaks · −dF/dT</h3><div class="reaction-chart-wrap"><canvas id="live-derivative-chart" role="img" aria-label="Negative fluorescence derivative versus temperature"></canvas></div></div>
           <p id="live-melting-note" class="hint"></p></section>
@@ -112,7 +112,7 @@
           <h3 class="reaction-plot-title">Background-corrected fluorescence</h3>
           <div class="reaction-chart-wrap"><canvas id="archive-corrected-chart" role="img" aria-label="Saved background-corrected fluorescence for Region 1 to Region 4"></canvas></div>
           <section id="archive-melting" hidden class="melting-plots">
-          <h3>Melting curve · Raw fluorescence</h3><p class="hint">Region 1–4 use the colors above. Temperature axis shows commanded setpoints; measured temperatures are saved in CSV. No amplification baseline subtraction or EMA smoothing is applied.</p>
+          <h3>Melting curve · Smoothed fluorescence</h3><p class="hint">Region 1–4 use the colors above. Temperature axis shows commanded setpoints; measured temperatures are saved in CSV. Five-point local quadratic smoothing is applied before differentiation (fewer than five points remain unsmoothed). Original raw values stay in CSV.</p>
           <div class="reaction-chart-wrap"><canvas id="archive-melting-chart" role="img" aria-label="Melting fluorescence versus setpoint temperature"></canvas></div>
           <div id="archive-derivative" hidden><h3>Melting peaks · −dF/dT</h3><div class="reaction-chart-wrap"><canvas id="archive-derivative-chart" role="img" aria-label="Negative fluorescence derivative versus temperature"></canvas></div></div>
           <p id="archive-melting-note" class="hint"></p></section>
@@ -129,6 +129,6 @@
   </main>
   <footer><span>STEEL MEMBRANE / LAB INSTRUMENTS</span><span>Local acquisition · Traceable records</span></footer>
   <dialog id="photo-dialog"><div class="dialog-head"><span id="photo-title"></span><button id="close-photo" class="secondary">Close ×</button></div><img id="full-photo" alt="Archived photo"><div class="dialog-foot"><button id="previous-photo" class="secondary">← Previous photo</button><button id="delete-photo" class="danger">Delete photo</button><a id="download-photo" class="primary" download>Download original ↓</a><button id="next-photo" class="secondary">Next photo →</button></div></dialog>
-  <script src="/static/app.js?v=recovery-1" defer></script>
-  <script src="/static/reaction.js?v=recovery-1" defer></script>
+  <script src="/static/app.js?v=refine-1" defer></script>
+  <script src="/static/reaction.js?v=refine-1" defer></script>
 </body></html>

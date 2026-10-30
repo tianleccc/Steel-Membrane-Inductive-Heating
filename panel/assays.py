@@ -83,13 +83,8 @@ class Archive:
         def normalized(value):
             return ' '.join(unicodedata.normalize('NFKC', value).split()).casefold()
         names = [record['name'] for record in self.records()]
-        # Deleted assays can be restored; reserve their names as well.
-        for path in self.trash.glob('*/0/assay.json'):
-            if any(p.is_symlink() for p in (path, path.parent, path.parent.parent)):
-                continue
-            names.append(json.loads(path.read_text(encoding='utf-8'))['name'])
         if normalized(name) in {normalized(value) for value in names}:
-            raise ValueError('This assay name already exists, including recoverable deleted assays. Choose a unique name.')
+            raise ValueError('This assay name already exists. Choose a unique name.')
 
     def save(self, record):
         write_json(self.folder(record['id'])/'assay.json', record)
@@ -122,7 +117,12 @@ class Archive:
         if kind == 'assay':
             if assay_id == 'unassigned':
                 raise ValueError('Delete individual unassigned files instead')
-            paths = [self.folder(assay_id)]
+            folder = self.folder(assay_id)
+            if self.assays.is_symlink() or folder.resolve().parent != self.assays:
+                raise ValueError('Invalid assay folder')
+            shutil.rmtree(folder)
+            self.purge_assay_trash({assay_id})
+            return None
         else:
             path = self.file(assay_id, kind, name)
             paths = [path]
@@ -140,6 +140,38 @@ class Archive:
         if not paths:
             return None, 0
         return self.move_to_trash(paths, None, 'all_logs'), len(paths)
+
+    def purge_assay_trash(self, assay_ids=None):
+        """Remove only trash belonging to explicitly deleted assay folders."""
+        if self.trash.is_symlink() or self.assays.is_symlink():
+            raise ValueError('Cannot purge linked archive folders')
+        entries = []
+        deleted = set(assay_ids or ())
+        for folder in self.trash.iterdir():
+            if folder.is_symlink() or not folder.is_dir() or not re.fullmatch(r'[0-9a-f]{32}',folder.name):
+                continue
+            path = folder/'manifest.json'
+            if path.is_symlink() or not path.is_file():
+                continue
+            manifest = json.loads(path.read_text(encoding='utf-8'))
+            aid = manifest.get('assay_id')
+            if not isinstance(aid,str) or not re.fullmatch(r'\d{8}T\d{6}Z_[0-9a-f]{12}',aid):
+                continue
+            if manifest.get('restored_at') or (self.assays/aid).exists():
+                continue
+            entries.append((folder,aid))
+            if manifest.get('kind') == 'assay':
+                deleted.add(aid)
+        count = size = 0
+        for folder,aid in entries:
+            if aid not in deleted:
+                continue
+            if folder.resolve().parent != self.trash.resolve():
+                raise ValueError('Invalid trash folder')
+            size += sum(p.stat().st_size for p in folder.rglob('*') if p.is_file() and not p.is_symlink())
+            shutil.rmtree(folder)
+            count += 1
+        return dict(folders=count,bytes=size)
 
     def move_to_trash(self, paths, assay_id, kind):
         if any(p.is_symlink() for p in paths):
@@ -170,6 +202,8 @@ class Archive:
         manifest = json.loads((folder/'manifest.json').read_text(encoding='utf-8'))
         if manifest.get('restored_at'):
             raise ValueError('This item has already been restored')
+        if manifest.get('kind') == 'assay':
+            raise ValueError('Assay folder deletion is permanent')
         pairs = []
         for item in manifest['entries']:
             original = self.root/item['original']
@@ -370,8 +404,14 @@ class Assays:
 
     def snapshot(self):
         with self.lock:
+            remaining = max(0,self.deadline-self.clock()) if self.active else 0
+            stage_remaining = remaining
+            if self.active and self.active['stage'] == 'melting':
+                remaining = max(0,self.capture_due-self.clock())
+                later = len(self.active['melting']['targets'])-self.active['melting_index']-1
+                stage_remaining = remaining+later*60+(later+1)*self.c.get('led_warmup_s',1)
             return dict(active=dict(self.active) if self.active else None,last=self.last,
-                        remaining_s=max(0,(self.capture_due if self.active and self.active['stage']=='melting' else self.deadline)-self.clock()) if self.active else 0,error=self.error)
+                        remaining_s=remaining,stage_remaining_s=stage_remaining,error=self.error)
 
     def assert_deletable(self, assay_id):
         if self.active and self.active['id']==assay_id:

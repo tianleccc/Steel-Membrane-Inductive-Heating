@@ -126,8 +126,8 @@ function drawReactionChart() {
     $(prefix+'-derivative').hidden = !data.derivative.length;
     const latest = data.points[data.points.length-1];
     const detail = latest ? `${data.points.length} melting points · Latest setpoint ${number(latest.temperature)} °C · Measured ${number(latest.measured_c)} °C. ` : '';
-    $(prefix+'-melting-note').textContent = detail+(data.completed ? 'Melting complete. −dF/dT uses finite differences of raw fluorescence against commanded temperature (a.u./°C).' : 'The −dF/dT plot appears after all melting points finish successfully.');
-    drawFluorescenceChart(prefix+'-melting-chart',data.points,'raw','temperature');
+    $(prefix+'-melting-note').textContent = detail+(data.completed ? 'Melting complete. −dF/dT uses finite differences of smoothed fluorescence against commanded temperature (a.u./°C).' : 'The −dF/dT plot appears after all melting points finish successfully.');
+    drawFluorescenceChart(prefix+'-melting-chart',data.points,'smoothed','temperature');
     drawFluorescenceChart(prefix+'-derivative-chart',data.derivative,'derivative','temperature');
   }
 }
@@ -145,7 +145,7 @@ function drawFluorescenceChart(id, points, field, axis='time_min') {
   const high = peak*1.1; low *= 1.1;
   const x = v => left+(v-start)/(end-start)*(right-left), y = v => bottom-(v-low)/(high-low)*(bottom-top);
   ctx.font = '11px sans-serif'; ctx.fillStyle = '#637468';
-  ctx.fillText(field === 'derivative' ? '−dF/dT (a.u./°C)' : `${field === 'raw' ? 'Raw' : 'Corrected'} fluorescence (a.u.)`, left, 15);
+  ctx.fillText(field === 'derivative' ? '−dF/dT (a.u./°C)' : `${field === 'raw' ? 'Raw' : field === 'smoothed' ? 'Smoothed' : 'Corrected'} fluorescence (a.u.)`, left, 15);
   for (let i=0; i<=4; i++) {
     const value = low+(high-low)*i/4;
     ctx.strokeStyle = '#e8ede7'; ctx.beginPath(); ctx.moveTo(left,y(value)); ctx.lineTo(right,y(value)); ctx.stroke();

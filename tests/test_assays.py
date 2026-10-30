@@ -144,12 +144,13 @@ class AssayTests(unittest.TestCase):
         logs=self.client.get('/api/logs?operator=Alice').json['items']
         self.assertEqual([r['assay_id'] for r in logs],[first['id']])
 
-    def test_deleted_assay_name_reserved_for_restore(self):
+    def test_deleted_assay_name_reusable_and_folder_permanently_removed(self):
         record=self.start(); self.post('assays/stop')
         deleted=self.post('archive/delete',dict(kind='assay',assay_id=record['id']))
         self.assertEqual(deleted.status_code,200)
-        self.assertEqual(self.post('assays/start',self.payload).status_code,400)
-        self.assertEqual(self.post('archive/restore',dict(trash_id=deleted.json['trash_id'])).status_code,200)
+        self.assertIsNone(deleted.json['trash_id'])
+        self.assertFalse((self.manager.archive.assays/record['id']).exists())
+        self.assertEqual(self.post('assays/start',self.payload).status_code,200)
 
     def test_photo_delete_and_restore_preserve_other_assays(self):
         first=self.start(); self.post('assays/stop')
@@ -175,17 +176,34 @@ class AssayTests(unittest.TestCase):
         self.assertEqual(self.post('archive/restore',dict(trash_id=result.json['trash_id'])).status_code,200)
         self.assertEqual(len(self.client.get('/api/logs').json['items']),1)
 
-    def test_folder_delete_restore_and_path_traversal(self):
+    def test_folder_permanent_delete_and_path_traversal(self):
         record=self.start(); self.post('assays/stop')
         photo=self.photo(record['id'])
         result=self.post('archive/delete',dict(kind='assay',assay_id=record['id']))
         self.assertEqual(result.status_code,200)
         self.assertFalse(photo.exists())
-        self.assertEqual(self.post('archive/restore',dict(trash_id=result.json['trash_id'])).status_code,200)
-        self.assertTrue(photo.exists())
+        self.assertIsNone(result.json['trash_id'])
+        self.assertEqual(self.post('archive/restore',dict(trash_id=result.json['trash_id'])).status_code,400)
+        self.assertFalse(photo.exists())
         for assay_id in ('../../', '/etc', 'unassigned/../assays'):
             self.assertEqual(self.post('archive/delete',dict(kind='assay',assay_id=assay_id)).status_code,400)
         with self.assertRaises(ValueError): self.manager.archive.file('unassigned','logs','../config.json')
+
+    def test_old_deleted_assay_trash_purged_without_touching_live_or_manual_files(self):
+        old=self.start(); self.post('assays/stop')
+        photo=self.photo(old['id'])
+        trash=self.manager.archive.move_to_trash([photo.parent.parent],old['id'],'assay')
+        live=self.start('Live folder'); self.post('assays/stop')
+        other=self.photo(live['id'])
+        manual=self.photo('unassigned')
+        manual_trash=self.manager.archive.delete('unassigned','photos',manual.name)
+        self.manager.archive.assert_unique_name(old['name'])
+        result=self.manager.archive.purge_assay_trash()
+        self.assertEqual(result['folders'],1)
+        self.assertGreater(result['bytes'],0)
+        self.assertFalse((self.manager.archive.trash/trash).exists())
+        self.assertTrue(other.exists())
+        self.assertTrue((self.manager.archive.trash/manual_trash).exists())
 
     def test_clear_all_logs_and_undo_preserve_photos(self):
         record=self.start(); self.post('assays/stop')

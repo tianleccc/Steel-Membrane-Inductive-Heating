@@ -341,6 +341,12 @@ def create_app(config=None, heater=None, camera=None):
             assays.assert_deletable(assay_id)
             exports.protect(assay_id)
             trash_id=archive.delete(assay_id,data.get('kind'),data.get('name'))
+            if data.get('kind') == 'assay':
+                with exports.lock:
+                    if exports.job and exports.job['assay_id'] == assay_id:
+                        if exports.job.get('_zip'):
+                            exports.job['_zip'].unlink(missing_ok=True)
+                        exports.job = None
         return jsonify(ok=True,trash_id=trash_id)
 
     @app.post('/api/archive/clear-logs')

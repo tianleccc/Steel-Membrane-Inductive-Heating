@@ -196,8 +196,37 @@ class MeltingTests(unittest.TestCase):
         self.heater.sample([(25,23)]*3)
         self.assertGreater(self.heater.output(),0)
 
+    def test_stage_remaining_tracks_melting_schedule_not_safety_deadline(self):
+        self.begin(); self.post('assays/skip'); self.manager.tick()
+        self.assertEqual(self.manager.snapshot()['stage_remaining_s'],180)
+        self.assertEqual(self.manager.snapshot()['remaining_s'],60)
+        self.assertEqual(self.heater.snapshot()['remaining_s'],270)
+        self.advance(30)
+        self.assertEqual(self.manager.snapshot()['stage_remaining_s'],150)
+        self.advance(31); self.done_photo()
+        self.assertEqual(self.manager.snapshot()['stage_remaining_s'],120)
+
 
 class DerivativeTests(unittest.TestCase):
+    def test_five_point_quadratic_smoothing_preserves_shape_and_reduces_noise(self):
+        import numpy as np
+        rows=[]
+        for i,x in enumerate([40,41,42,43,44,45,46,47,48,49,49.5]):
+            row=dict(Image=str(x),UTC='',Time_min=i,Stage='melting',Setpoint_C=x,Measured_C=x)
+            row.update({f'Raw_Region_{r}':10000-x*x for r in range(1,5)})
+            rows.append(row)
+        clean=melting_series(rows,True)
+        for point in clean['points']:
+            np.testing.assert_allclose(point['smoothed'],point['raw'],rtol=1e-10)
+        for i,row in enumerate(rows):
+            for r in range(1,5): row[f'Raw_Region_{r}']+=30*np.sin(i*2)
+        data=melting_series(rows,True)
+        raw=np.array([p['raw'][0] for p in data['points']])
+        smooth=np.array([p['smoothed'][0] for p in data['points']])
+        truth=np.array([10000-p['temperature']**2 for p in data['points']])
+        self.assertLess(np.mean((smooth-truth)**2),np.mean((raw-truth)**2))
+        self.assertEqual(data['points'][0]['raw'][0],rows[0]['Raw_Region_1'])
+
     def test_nonuniform_gradient_sign_no_amplification_baseline_and_completion_gate(self):
         rows=[]
         for x in [40,41,42,42.5]:
